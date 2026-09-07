@@ -12,6 +12,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -80,6 +81,10 @@ REQUEST_TIMEOUT = int(_env("SCRAPER_TIMEOUT", "30"))
 # look like a burst to the rate limiter.
 PER_TEAM_DELAY = float(_env("SCRAPER_DELAY", "1.5"))
 # Browser profile curl_cffi impersonates; "chrome" tracks its newest build.
+# A full season is ~54 games; far fewer means parsing broke.
+MIN_GAMES = int(_env("SCRAPER_MIN_GAMES", "40"))
+# Where to save a page that would not parse, for offline inspection.
+DEBUG_DIR = _env("SCRAPER_DEBUG_DIR", "")
 IMPERSONATE = _env("SCRAPER_IMPERSONATE", "chrome")
 # Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
 FORCE_REQUESTS = _env("SCRAPER_FORCE_REQUESTS", "0") not in ("0", "false", "no")
@@ -103,7 +108,12 @@ TEAMS = {
 TEAM_NAMES = sorted(TEAMS.keys(), key=len, reverse=True)
 TEAM_ALT = "|".join(re.escape(t) for t in TEAM_NAMES)
 
-# Matches a single schedule row as it appears in the flattened page text:
+DATE_RE = re.compile(r"(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})")
+TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
+TEAM_FIND_RE = re.compile(TEAM_ALT)
+
+# Fallback only — see parse_games. Matches a schedule row as it appears in
+# the flattened page text, which breaks on any column or markup change:
 #   - <round> <home x3> VS <time> <date> <away x3> <weekday> <date> <date> <time> <venue...>
 ROW_RE = re.compile(
     r"-\s*(\d+)\s+"
@@ -192,7 +202,7 @@ def report_block(resp) -> None:
     print("--- end diagnostics ---\n", file=sys.stderr)
 
 
-def fetch_page_text(session, url: str) -> str:
+def fetch_page_html(session, url: str) -> str:
     last_error = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -214,8 +224,7 @@ def fetch_page_text(session, url: str) -> str:
                     f"{resp.status_code} for url: {url}", response=resp
                 )
             else:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                return soup.get_text(separator=" ")
+                return resp.text
         except Exception as e:
             # curl_cffi raises its own exception types, so this stays broad;
             # main() reports whatever comes out per team.
@@ -234,7 +243,100 @@ def fetch_page_text(session, url: str) -> str:
     raise last_error
 
 
-def parse_games(page_text: str, target_team: str):
+def teams_in(text: str):
+    """Team names in order of appearance, with consecutive repeats collapsed.
+
+    A row names each club several times over (crest alt text, short name,
+    full name), so only the transitions between clubs carry information.
+    """
+    found = []
+    for m in TEAM_FIND_RE.finditer(text):
+        name = m.group(0)
+        if not found or found[-1] != name:
+            found.append(name)
+    return found
+
+
+def round_from(cells):
+    """Round number: the first standalone small integer cell, if any."""
+    for cell in cells:
+        if cell.isdigit() and len(cell) <= 3:
+            return int(cell)
+    return None
+
+
+def venue_from(cells, pair):
+    """Best-effort venue: the last cell that is not a team, date, time or number."""
+    for cell in reversed(cells):
+        # Skip separator and label cells ("VS", "-", a lone weekday).
+        if len(cell) < 4 or cell.isdigit():
+            continue
+        if DATE_RE.search(cell) or TIME_RE.search(cell):
+            continue
+        # A venue legitimately contains a club name ("Zimný štadión HC
+        # Košice"), so only reject a cell that is *nothing but* club names.
+        remainder = cell
+        for team in pair:
+            remainder = remainder.replace(team, " ")
+        if len(remainder.strip()) < 4:
+            continue
+        return cell
+    return ""
+
+
+def parse_games_from_rows(soup, target_team):
+    """Read the schedule off the table rows.
+
+    Structural rather than positional: a row counts if it names two clubs,
+    a date and a time, whatever order its columns are in. Reordered or
+    added columns then no longer take the whole parse to zero, which is
+    what a single flattened-text regex does.
+    """
+    games = []
+    seen = set()
+
+    for tr in soup.find_all("tr"):
+        cells = [" ".join(c.get_text(" ").split()) for c in tr.find_all(["td", "th"])]
+        if len(cells) < 2:
+            continue
+        row_text = " ".join(cells)
+
+        pair = teams_in(row_text)
+        # Home first, away second — the order the fixture is written in.
+        if len(pair) < 2 or target_team not in pair[:2]:
+            continue
+
+        date_m = DATE_RE.search(row_text)
+        time_m = TIME_RE.search(row_text)
+        if not date_m or not time_m:
+            continue
+
+        d, mo, y = (int(x) for x in date_m.groups())
+        date_str = f"{d:02d}.{mo:02d}.{y}"
+        time_str = f"{int(time_m.group(1)):02d}:{time_m.group(2)}"
+
+        home, away = pair[0], pair[1]
+        key = (date_str, home, away)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        games.append(
+            {
+                "round": round_from(cells),
+                "is_home": home == target_team,
+                "opponent": away if home == target_team else home,
+                "date": date_str,
+                "time": time_str,
+                "venue": venue_from(cells, (home, away)),
+            }
+        )
+
+    return games
+
+
+def parse_games_from_text(page_text: str, target_team: str):
+    """Legacy fallback for a page whose fixtures are not in a table."""
     games = []
     for m in ROW_RE.finditer(page_text):
         round_no, home_team, time_str, date_str, away_team, venue = m.groups()
@@ -252,6 +354,60 @@ def parse_games(page_text: str, target_team: str):
             }
         )
     return games
+
+
+def parse_games(html: str, target_team: str):
+    soup = BeautifulSoup(html, "html.parser")
+    games = parse_games_from_rows(soup, target_team)
+
+    if len(games) < MIN_GAMES:
+        fallback = parse_games_from_text(soup.get_text(separator=" "), target_team)
+        if len(fallback) > len(games):
+            return fallback
+
+    return games
+
+
+_page_dumped = False
+
+
+def dump_page(slug: str, html: str) -> None:
+    """Save and summarise a page that would not parse.
+
+    Whether the markup changed shape or the fixtures are not in the HTML
+    at all (rendered client-side) decides the fix, and the game count
+    alone does not distinguish them.
+    """
+    global _page_dumped
+    if _page_dumped:
+        return
+    _page_dumped = True
+
+    soup = BeautifulSoup(html, "html.parser")
+    text = " ".join(soup.get_text(separator=" ").split())
+
+    print(
+        "\n--- page diagnostics (first team that parsed too few games) ---",
+        file=sys.stderr,
+    )
+    print(f"html length: {len(html)}", file=sys.stderr)
+    print(
+        f"tables: {len(soup.find_all('table'))}, "
+        f"rows: {len(soup.find_all('tr'))}, "
+        f"team-name mentions: {len(TEAM_FIND_RE.findall(text))}",
+        file=sys.stderr,
+    )
+    print(f"text[:1200]: {text[:1200]}", file=sys.stderr)
+
+    target = Path(DEBUG_DIR) if DEBUG_DIR else Path(tempfile.gettempdir())
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        out = target / f"{slug}.debug.html"
+        out.write_text(html, encoding="utf-8")
+        print(f"saved raw HTML to {out}", file=sys.stderr)
+    except OSError as e:
+        print(f"(could not save raw HTML: {e})", file=sys.stderr)
+    print("--- end page diagnostics ---\n", file=sys.stderr)
 
 
 def to_utc(date_str: str, time_str: str) -> datetime:
@@ -279,18 +435,26 @@ def build_ics(team_name: str, slug: str, games) -> str:
         start_utc = to_utc(g["date"], g["time"])
         end_utc = start_utc + GAME_DURATION
         d, mo, y = g["date"].split(".")
-        uid = f"{slug}-{g['round']}-{y}{mo}{d}@tipsportliga"
+        # Round is not always present in the markup; the date plus the
+        # opponent still identifies the fixture uniquely, and the UID has
+        # to stay stable so subscribers do not see duplicate events.
+        if g["round"] is None:
+            opp_key = re.sub(r"[^a-z0-9]+", "", g["opponent"].lower())
+            uid = f"{slug}-{y}{mo}{d}-{opp_key}@tipsportliga"
+        else:
+            uid = f"{slug}-{g['round']}-{y}{mo}{d}@tipsportliga"
 
+        round_part = f"kolo {g['round']}, " if g["round"] is not None else ""
         if g["is_home"]:
             summary = f"{team_name} - {g['opponent']}"
             desc = (
-                f"Domáci zápas {team_name} (kolo {g['round']}, Tipsport liga). "
+                f"Domáci zápas {team_name} ({round_part}Tipsport liga). "
                 f"Súper: {g['opponent']}."
             )
         else:
             summary = f"{g['opponent']} - {team_name}"
             desc = (
-                f"Zápas {team_name} na ihrisku súpera (kolo {g['round']}, "
+                f"Zápas {team_name} na ihrisku súpera ({round_part}"
                 f"Tipsport liga). Súper: {g['opponent']}."
             )
 
@@ -321,18 +485,18 @@ def main():
 
         url = team_page_url(team_id, slug)
         try:
-            page_text = fetch_page_text(session, url)
-            games = parse_games(page_text, team_name)
+            html = fetch_page_html(session, url)
+            games = parse_games(html, team_name)
 
-            if len(games) < 40:
-                # A full season is ~54 games. Far fewer means parsing
-                # broke (site redesign etc.) — skip this team rather
-                # than overwrite a good file with a broken one.
+            if len(games) < MIN_GAMES:
+                # Skip this team rather than overwrite a good file with a
+                # broken one, and dump the page so the shape can be seen.
                 print(
                     f"WARNING: {team_name}: only parsed {len(games)} games, "
                     "expected ~54. Skipping this team's file.",
                     file=sys.stderr,
                 )
+                dump_page(slug, html)
                 failures.append(team_name)
                 continue
 

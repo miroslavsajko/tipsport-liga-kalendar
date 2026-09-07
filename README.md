@@ -53,6 +53,8 @@ repository variables (Settings → Secrets and variables → Actions → Variabl
 | `SCRAPER_MAX_ATTEMPTS` | `4` | Retries per page |
 | `SCRAPER_IMPERSONATE` | `chrome` | curl_cffi browser profile, e.g. `chrome131`, `safari17_0` |
 | `SCRAPER_FORCE_REQUESTS` | `0` | Set to `1` to bypass curl_cffi and use plain `requests` |
+| `SCRAPER_MIN_GAMES` | `40` | Below this a team is treated as a parse failure |
+| `SCRAPER_DEBUG_DIR` | temp dir | Where an unparseable page is saved for inspection |
 
 Headers alone were not enough, so the scraper prefers **curl_cffi**, which
 replays a real Chrome TLS/HTTP2 fingerprint. Bot-management products match on
@@ -75,4 +77,21 @@ Running the script from a local machine tells the two apart: if it works
 there and not in Actions, the block is on the IP.
 
 A failed run never overwrites a good `.ics`: teams that error out, or that
-parse fewer than 40 games, are skipped and their existing file is left alone.
+parse fewer than `SCRAPER_MIN_GAMES` games, are skipped and their existing
+file is left alone.
+
+## Parsing
+Fixtures are read structurally: a table row counts as a game if it names two
+clubs, a date and a time, in whatever column order. That survives reordered
+or added columns, which a single flattened-text regex does not — the original
+regex went to zero games on a markup change. That regex is kept as a fallback
+for a page whose fixtures are not in a table.
+
+The round number is optional. When the markup does not carry one, the event
+UID falls back to date-plus-opponent so it stays stable across runs and
+subscribers do not see duplicated events.
+
+If a page still parses short, the script saves it (`SCRAPER_DEBUG_DIR`) and
+prints its size, table/row counts and a text snippet — enough to tell a
+markup change from fixtures that are rendered client-side and simply are not
+in the HTML.
