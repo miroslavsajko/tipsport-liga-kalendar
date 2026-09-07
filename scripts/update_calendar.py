@@ -16,13 +16,12 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
 
-DEFAULT_DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 TZ = ZoneInfo("Europe/Bratislava")
 GAME_DURATION = timedelta(hours=2, minutes=30)
 
@@ -47,8 +46,6 @@ def _env(name: str, default: str) -> str:
 
 
 USER_AGENT = _env("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT)
-# Where the .ics files land; docs/ is what GitHub Pages serves.
-DOCS_DIR = Path(_env("SCRAPER_OUTPUT_DIR", str(DEFAULT_DOCS_DIR)))
 
 BROWSER_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -95,13 +92,6 @@ BACKEND = _env("SCRAPER_BACKEND", "auto")
 # Override when the installed Chromium is not the build Playwright expects.
 BROWSER_PATH = _env("SCRAPER_BROWSER_PATH", "")
 BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "no")
-# A persistent profile keeps Cloudflare's clearance cookie between runs, so a
-# long-lived service solves the challenge once rather than on every scrape.
-BROWSER_PROFILE = _env("SCRAPER_BROWSER_PROFILE", "")
-# Outbound proxy, e.g. http://user:pass@host:port. Cloudflare challenges
-# datacenter IPs whatever the browser looks like, so a run from anywhere but
-# a residential connection needs to route through one.
-PROXY = _env("SCRAPER_PROXY", "")
 # Seconds to let Cloudflare's interstitial run before giving up on a page.
 CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
 # Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
@@ -148,28 +138,6 @@ def team_page_url(team_id: int, slug: str) -> str:
         f"https://www.hockeyslovakia.sk/sk/stats/teams/1197/tipsport-liga/"
         f"team/{team_id}/{slug}/Program"
     )
-
-
-def playwright_proxy():
-    """SCRAPER_PROXY split into Playwright's proxy dict, or None."""
-    if not PROXY:
-        return None
-    parsed = urlparse(PROXY)
-    server = f"{parsed.scheme}://{parsed.hostname}"
-    if parsed.port:
-        server += f":{parsed.port}"
-    proxy = {"server": server}
-    if parsed.username:
-        proxy["username"] = unquote(parsed.username)
-    if parsed.password:
-        proxy["password"] = unquote(parsed.password)
-    return proxy
-
-
-def redacted_proxy() -> str:
-    """The proxy host, without credentials, safe to print."""
-    parsed = urlparse(PROXY)
-    return f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ''}".rstrip(":")
 
 
 class ChallengeError(RuntimeError):
@@ -226,9 +194,6 @@ class BrowserSession:
         launch_kwargs = {"headless": BROWSER_HEADLESS}
         if BROWSER_PATH:
             launch_kwargs["executable_path"] = BROWSER_PATH
-        proxy = playwright_proxy()
-        if proxy:
-            launch_kwargs["proxy"] = proxy
 
         context_kwargs = {
             "locale": "sk-SK",
@@ -236,19 +201,9 @@ class BrowserSession:
             "viewport": {"width": 1366, "height": 900},
         }
 
-        if BROWSER_PROFILE:
-            # A persistent context *is* the browser, so there is no separate
-            # browser object to close later.
-            Path(BROWSER_PROFILE).mkdir(parents=True, exist_ok=True)
-            self._browser = None
-            self._ctx = self._pw.chromium.launch_persistent_context(
-                BROWSER_PROFILE, **launch_kwargs, **context_kwargs
-            )
-            self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
-        else:
-            self._browser = self._pw.chromium.launch(**launch_kwargs)
-            self._ctx = self._browser.new_context(**context_kwargs)
-            self._page = self._ctx.new_page()
+        self._browser = self._pw.chromium.launch(**launch_kwargs)
+        self._ctx = self._browser.new_context(**context_kwargs)
+        self._page = self._ctx.new_page()
 
     def get(self, url: str, headers=None, timeout=None) -> _BrowserResponse:
         resp = self._page.goto(
@@ -267,11 +222,7 @@ class BrowserSession:
         return _BrowserResponse(status or 403, self._page.content())
 
     def close(self):
-        closers = [self._ctx.close]
-        if self._browser is not None:
-            closers.append(self._browser.close)
-        closers.append(self._pw.stop)
-        for closer in closers:
+        for closer in (self._ctx.close, self._browser.close, self._pw.stop):
             try:
                 closer()
             except Exception:
@@ -328,10 +279,6 @@ def build_session():
         session.headers.update(BROWSER_HEADERS)
         reason = "forced" if FORCE_REQUESTS else "curl_cffi not installed"
         print(f"HTTP backend: requests ({reason})", file=sys.stderr)
-
-    if PROXY:
-        session.proxies = {"http": PROXY, "https": PROXY}
-        print(f"outbound proxy: {redacted_proxy()}", file=sys.stderr)
 
     try:
         session.get(f"{BASE_URL}/sk/", timeout=REQUEST_TIMEOUT)
@@ -690,13 +637,9 @@ def build_ics(team_name: str, slug: str, games) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def scrape_all(out_dir=None):
-    """Scrape every team into out_dir. Returns (written, failures).
-
-    Split out of main() so a long-running service can call it directly
-    instead of shelling out to the script.
-    """
-    out_dir = Path(out_dir) if out_dir else DOCS_DIR
+def scrape_all():
+    """Scrape every team into DOCS_DIR. Returns (written, failures)."""
+    out_dir = DOCS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     failures = []

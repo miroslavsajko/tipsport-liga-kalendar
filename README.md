@@ -89,7 +89,6 @@ than code changes:
 | Variable | Default | Purpose |
 |---|---|---|
 | `SCRAPER_USER_AGENT` | current Chrome UA string | Refresh the browser identity (plain-`requests` backend only) |
-| `SCRAPER_OUTPUT_DIR` | `docs/` | Where the `.ics` files are written |
 | `SCRAPER_DELAY` | `1.5` | Seconds between team pages |
 | `SCRAPER_MAX_ATTEMPTS` | `4` | Retries per page |
 | `SCRAPER_IMPERSONATE` | `chrome` | curl_cffi browser profile, e.g. `chrome131`, `safari17_0` |
@@ -100,8 +99,6 @@ than code changes:
 | `SCRAPER_CHALLENGE_TIMEOUT` | `45` | Seconds to let the interstitial run |
 | `SCRAPER_BROWSER_HEADLESS` | `1` | `0` runs headed (pair with `xvfb-run`) |
 | `SCRAPER_BROWSER_PATH` | Playwright's | Override the Chromium binary path |
-| `SCRAPER_BROWSER_PROFILE` | none | Persistent Chromium profile dir; keeps the clearance cookie between runs |
-| `SCRAPER_PROXY` | none | Outbound proxy, `http://user:pass@host:port`, used by the HTTP clients and Chromium alike |
 
 The site is behind **Cloudflare**, which serves a JS interstitial
 (`cf-mitigated: challenge`, "Just a moment..."). No HTTP client can clear
@@ -133,7 +130,7 @@ snippet. That identifies the blocker, which decides the fix:
 - **A JS/CAPTCHA challenge page** — no HTTP client gets through; it needs a
   real browser (Playwright).
 - **A bare deny, no challenge** — the source IP is blocked, and nothing in this
-  script can change that; it needs a different network, or `SCRAPER_PROXY`.
+  script can change that; it needs a different network.
 
 A failed run never overwrites a good `.ics`: teams that error out, or that
 parse fewer than `SCRAPER_MIN_GAMES` games, are skipped and their existing
