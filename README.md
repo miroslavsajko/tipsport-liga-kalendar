@@ -11,10 +11,28 @@ Daily auto-updated `.ics` calendars — one per Tipsport liga team.
   is disabled because Cloudflare challenges GitHub-hosted runners
 - `docs/<team-slug>.ics` — the files GitHub Pages serves publicly
 
-**Where it runs:** scraping happens on Railway, because Cloudflare's managed
-challenge blocks GitHub Actions runners. Railway pushes the results back here,
-so the GitHub Pages URLs — and any existing calendar subscriptions — keep
-working, and it also serves them directly at its own domain.
+## Where this can run
+
+Cloudflare serves a managed JS challenge to **datacenter IPs**, and that is the
+whole story — it is not about headers, TLS fingerprints or the browser:
+
+| Environment | Result |
+|---|---|
+| A home/residential connection | works — all 12 teams scrape |
+| GitHub-hosted Actions runners | blocked (`cf-mitigated: challenge`) |
+| Railway | blocked, same challenge |
+
+So the scraper has to run from a residential IP. Three ways, in order of how
+little there is to go wrong:
+
+1. **`scripts/run_local.sh` on a schedule** on a machine you already own — see
+   *Running locally on a schedule*. Simplest, and it is the configuration
+   already proven to work.
+2. **A self-hosted GitHub Actions runner** on that machine. Keeps the Actions
+   UI, schedule, logs and secrets; set the repository variable `RUNNER_LABEL`
+   to `self-hosted` and re-enable the cron in the workflow.
+3. **Railway plus a residential proxy** (`SCRAPER_PROXY`). Only worth it if you
+   have no always-on machine, since it means paying for both.
 
 ## Team files
 | Team | File |
@@ -46,7 +64,49 @@ Note: only `hc-kosice.ics` is included in this initial commit (pre-built from
 the current schedule). The other 11 team files will appear in `docs/` after
 the workflow's first run (manual trigger or the next 06:00 UTC).
 
+## Running locally on a schedule
+
+`scripts/run_local.sh` scrapes, commits and pushes. It publishes a partial
+scrape rather than holding everything back when one team fails, and exits
+non-zero so a scheduler still records the failure.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+.venv/bin/playwright install chromium
+scripts/run_local.sh --no-push   # try it once without pushing
+```
+
+The script uses `.venv/bin/python` when that exists, so a scheduler needs no
+global install. Push authentication uses whatever the checkout already has
+(SSH key or credential helper).
+
+**cron** (Linux/macOS) — every day at 06:30:
+
+```cron
+30 6 * * * /path/to/tipsport-liga-kalendar/scripts/run_local.sh >> /tmp/tipsport-kalendar.log 2>&1
+```
+
+**launchd** (macOS, survives sleep better than cron) — write a
+`~/Library/LaunchAgents/sk.tipsport.kalendar.plist` with `StartCalendarInterval`
+and `ProgramArguments` pointing at the script, then `launchctl load` it.
+
+**systemd** (Linux) — a `tipsport-kalendar.service` of `Type=oneshot` running
+the script, plus a `.timer` with `OnCalendar=*-*-* 06:30:00` and
+`Persistent=true` so a missed run happens at next boot.
+
+**Windows** — Task Scheduler, running `bash scripts/run_local.sh` under WSL or
+Git Bash.
+
+If the machine is often asleep, prefer the self-hosted Actions runner: GitHub
+queues the scheduled run and it executes when the runner next comes online.
+
 ## Deploying on Railway
+
+**This is blocked as-is** — Railway's IPs get the same Cloudflare challenge as
+GitHub Actions. The deployment below only works with `SCRAPER_PROXY` pointing
+at a residential/ISP proxy. It is kept because everything except the egress IP
+is proven working: the service builds, scrapes, serves and pushes.
+
 
 The service is one always-on container: a background thread scrapes every
 `SCRAPE_INTERVAL_HOURS` and pushes to GitHub, while an HTTP server on `$PORT`
@@ -128,6 +188,7 @@ repository variables (Settings → Secrets and variables → Actions → Variabl
 | `SCRAPER_CHALLENGE_TIMEOUT` | `45` | Seconds to let the interstitial run |
 | `SCRAPER_BROWSER_HEADLESS` | `1` | `0` runs headed (pair with `xvfb-run`) |
 | `SCRAPER_BROWSER_PATH` | Playwright's | Override the Chromium binary path |
+| `SCRAPER_PROXY` | none | Outbound proxy, `http://user:pass@host:port`, used by both the HTTP clients and Chromium |
 
 The site is behind **Cloudflare**, which serves a JS interstitial
 (`cf-mitigated: challenge`, "Just a moment..."). No HTTP client can clear

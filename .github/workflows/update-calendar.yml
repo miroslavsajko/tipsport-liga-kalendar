@@ -14,7 +14,10 @@ permissions:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    # GitHub-hosted runners get Cloudflare's challenge. Set the repository
+    # variable RUNNER_LABEL to "self-hosted" to run this on your own machine
+    # (a residential IP is not challenged) without editing the workflow.
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4

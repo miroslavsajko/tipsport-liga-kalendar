@@ -16,6 +16,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -97,6 +98,10 @@ BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "
 # A persistent profile keeps Cloudflare's clearance cookie between runs, so a
 # long-lived service solves the challenge once rather than on every scrape.
 BROWSER_PROFILE = _env("SCRAPER_BROWSER_PROFILE", "")
+# Outbound proxy, e.g. http://user:pass@host:port. Cloudflare challenges
+# datacenter IPs whatever the browser looks like, so routing through a
+# residential/ISP proxy is what makes a hosted deployment viable at all.
+PROXY = _env("SCRAPER_PROXY", "")
 # Seconds to let Cloudflare's interstitial run before giving up on a page.
 CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
 # Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
@@ -143,6 +148,28 @@ def team_page_url(team_id: int, slug: str) -> str:
         f"https://www.hockeyslovakia.sk/sk/stats/teams/1197/tipsport-liga/"
         f"team/{team_id}/{slug}/Program"
     )
+
+
+def playwright_proxy():
+    """SCRAPER_PROXY split into Playwright's proxy dict, or None."""
+    if not PROXY:
+        return None
+    parsed = urlparse(PROXY)
+    server = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        server += f":{parsed.port}"
+    proxy = {"server": server}
+    if parsed.username:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = unquote(parsed.password)
+    return proxy
+
+
+def redacted_proxy() -> str:
+    """The proxy host, without credentials, safe to print."""
+    parsed = urlparse(PROXY)
+    return f"{parsed.scheme}://{parsed.hostname}:{parsed.port or ''}".rstrip(":")
 
 
 class ChallengeError(RuntimeError):
@@ -199,6 +226,9 @@ class BrowserSession:
         launch_kwargs = {"headless": BROWSER_HEADLESS}
         if BROWSER_PATH:
             launch_kwargs["executable_path"] = BROWSER_PATH
+        proxy = playwright_proxy()
+        if proxy:
+            launch_kwargs["proxy"] = proxy
 
         context_kwargs = {
             "locale": "sk-SK",
@@ -298,6 +328,10 @@ def build_session():
         session.headers.update(BROWSER_HEADERS)
         reason = "forced" if FORCE_REQUESTS else "curl_cffi not installed"
         print(f"HTTP backend: requests ({reason})", file=sys.stderr)
+
+    if PROXY:
+        session.proxies = {"http": PROXY, "https": PROXY}
+        print(f"outbound proxy: {redacted_proxy()}", file=sys.stderr)
 
     try:
         session.get(f"{BASE_URL}/sk/", timeout=REQUEST_TIMEOUT)
