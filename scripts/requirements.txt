@@ -1,6 +1,4 @@
-requests>=2.31
 beautifulsoup4>=4.12
-# TLS/HTTP2 fingerprint impersonation — see the 403 notes in README.
+# Replays a real Chrome TLS/HTTP2 fingerprint; plain requests has an
+# obvious one that bot management matches on.
 curl_cffi>=0.7
-# Real browser, to clear Cloudflare's JS interstitial.
-playwright>=1.40
