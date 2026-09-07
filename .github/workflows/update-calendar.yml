@@ -27,6 +27,14 @@ jobs:
       - name: Run scraper
         id: scrape
         continue-on-error: true
+        env:
+          # Optional repository variables (Settings -> Variables) to tune the
+          # scraper without a code change if the site's edge starts pushing
+          # back again. Unset variables expand to "" and fall back to the
+          # script's defaults.
+          SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
+          SCRAPER_DELAY: ${{ vars.SCRAPER_DELAY }}
+          SCRAPER_MAX_ATTEMPTS: ${{ vars.SCRAPER_MAX_ATTEMPTS }}
         run: python3 scripts/update_calendar.py
 
       - name: Commit and push if changed
