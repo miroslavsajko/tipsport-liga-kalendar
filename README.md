@@ -48,14 +48,31 @@ repository variables (Settings → Secrets and variables → Actions → Variabl
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SCRAPER_USER_AGENT` | current Chrome UA string | Refresh the browser identity |
+| `SCRAPER_USER_AGENT` | current Chrome UA string | Refresh the browser identity (plain-`requests` backend only) |
 | `SCRAPER_DELAY` | `1.5` | Seconds between team pages |
 | `SCRAPER_MAX_ATTEMPTS` | `4` | Retries per page |
+| `SCRAPER_IMPERSONATE` | `chrome` | curl_cffi browser profile, e.g. `chrome131`, `safari17_0` |
+| `SCRAPER_FORCE_REQUESTS` | `0` | Set to `1` to bypass curl_cffi and use plain `requests` |
 
-If *every* team fails with 403 even after that, the block is on the source IP,
-not the headers — GitHub-hosted runner ranges are widely blocklisted. The
-remaining options are a self-hosted runner or an outbound proxy on an
-acceptable network. The script prints this hint when all teams fail.
+Headers alone were not enough, so the scraper prefers **curl_cffi**, which
+replays a real Chrome TLS/HTTP2 fingerprint. Bot-management products match on
+that fingerprint (JA3) regardless of how browser-like the headers are, and
+plain `requests` has an obvious one. It falls back to `requests` if curl_cffi
+is unavailable; the log line `HTTP backend: ...` says which was used.
+
+When a request is refused, the script dumps the first blocked response —
+status, telltale headers (`server`, `cf-ray`, `x-iinfo`, …) and a body
+snippet. That identifies the blocker, which decides the fix:
+
+- **A JS/CAPTCHA challenge page** — no HTTP client gets through; it needs a
+  real browser (Playwright).
+- **A bare deny, no challenge** — the source IP is blocked. GitHub-hosted
+  runner ranges are widely blocklisted and nothing in this script can change
+  that; it needs a self-hosted runner or an outbound proxy on an accepted
+  network.
+
+Running the script from a local machine tells the two apart: if it works
+there and not in Actions, the block is on the IP.
 
 A failed run never overwrites a good `.ics`: teams that error out, or that
 parse fewer than 40 games, are skipped and their existing file is left alone.

@@ -63,6 +63,15 @@ BROWSER_HEADERS = {
     "Connection": "keep-alive",
 }
 
+# Plain `requests` has a distinctive TLS/HTTP2 fingerprint (JA3) that bot
+# management products match on regardless of how browser-like the headers
+# are. curl_cffi replays a real Chrome fingerprint, which is the only way
+# to get past that from Python without driving an actual browser.
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # optional — the script still runs on plain requests
+    curl_requests = None
+
 # Status codes worth retrying: WAF/rate-limit pushback and transient 5xx.
 RETRY_STATUSES = {403, 408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = int(_env("SCRAPER_MAX_ATTEMPTS", "4"))
@@ -70,6 +79,10 @@ REQUEST_TIMEOUT = int(_env("SCRAPER_TIMEOUT", "30"))
 # Politeness delay between team pages, so a dozen hits in a row do not
 # look like a burst to the rate limiter.
 PER_TEAM_DELAY = float(_env("SCRAPER_DELAY", "1.5"))
+# Browser profile curl_cffi impersonates; "chrome" tracks its newest build.
+IMPERSONATE = _env("SCRAPER_IMPERSONATE", "chrome")
+# Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
+FORCE_REQUESTS = _env("SCRAPER_FORCE_REQUESTS", "0") not in ("0", "false", "no")
 
 # name -> (team_id, slug)
 TEAMS = {
@@ -109,30 +122,77 @@ def team_page_url(team_id: int, slug: str) -> str:
     )
 
 
-def build_session() -> requests.Session:
-    """A session with browser-like headers, warmed up on the site root.
+def use_curl_cffi() -> bool:
+    return curl_requests is not None and not FORCE_REQUESTS
+
+
+def build_session():
+    """A browser-like session, warmed up on the site root.
 
     The warm-up matters: the edge sets cookies on the first document
     request, and following requests that carry them are treated as an
     ongoing browsing session rather than a bare hit on a deep URL.
     """
-    session = requests.Session()
-    session.headers.update(BROWSER_HEADERS)
+    if use_curl_cffi():
+        # Impersonation supplies its own coherent header set; overriding it
+        # piecemeal is what makes a fingerprint look stitched together.
+        session = curl_requests.Session(impersonate=IMPERSONATE)
+        session.headers.update({"Accept-Language": BROWSER_HEADERS["Accept-Language"]})
+        print(f"HTTP backend: curl_cffi (impersonate={IMPERSONATE})", file=sys.stderr)
+    else:
+        session = requests.Session()
+        session.headers.update(BROWSER_HEADERS)
+        reason = "forced" if FORCE_REQUESTS else "curl_cffi not installed"
+        print(f"HTTP backend: requests ({reason})", file=sys.stderr)
 
     try:
-        session.get(
-            f"{BASE_URL}/sk/",
-            headers={"Sec-Fetch-Site": "none"},
-            timeout=REQUEST_TIMEOUT,
-        )
-    except requests.RequestException as e:
+        session.get(f"{BASE_URL}/sk/", timeout=REQUEST_TIMEOUT)
+    except Exception as e:
         # Not fatal — the team pages may still work.
         print(f"WARNING: warm-up request failed: {e}", file=sys.stderr)
 
     return session
 
 
-def fetch_page_text(session: requests.Session, url: str) -> str:
+_block_reported = False
+
+
+def report_block(resp) -> None:
+    """Dump the first refused response so the blocker can be identified.
+
+    Which product is saying no, and why, decides the fix: a JS/CAPTCHA
+    challenge needs a real browser, a plain IP deny needs a different
+    network. Guessing between them from a bare status code is what makes
+    this class of bug drag on.
+    """
+    global _block_reported
+    if _block_reported or resp is None:
+        return
+    _block_reported = True
+
+    interesting = {
+        "server", "cf-ray", "cf-mitigated", "cf-cache-status", "x-iinfo",
+        "x-cdn", "x-sucuri-id", "x-amz-cf-id", "via", "retry-after",
+        "content-type", "set-cookie", "x-request-id", "x-powered-by",
+}
+
+    print("\n--- block diagnostics (first refused response) ---", file=sys.stderr)
+    print(f"status: {getattr(resp, 'status_code', '?')}", file=sys.stderr)
+    try:
+        for k, v in resp.headers.items():
+            if k.lower() in interesting:
+                print(f"header: {k}: {v}", file=sys.stderr)
+    except Exception as e:
+        print(f"(could not read response headers: {e})", file=sys.stderr)
+    try:
+        body = " ".join((resp.text or "").split())[:800]
+        print(f"body[:800]: {body}", file=sys.stderr)
+    except Exception as e:
+        print(f"(could not read response body: {e})", file=sys.stderr)
+    print("--- end diagnostics ---\n", file=sys.stderr)
+
+
+def fetch_page_text(session, url: str) -> str:
     last_error = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -143,15 +203,22 @@ def fetch_page_text(session: requests.Session, url: str) -> str:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code in RETRY_STATUSES:
+                report_block(resp)
+                reason = getattr(resp, "reason", "") or ""
                 last_error = requests.HTTPError(
-                    f"{resp.status_code} {resp.reason} for url: {url}",
+                    f"{resp.status_code} {reason} for url: {url}".replace("  ", " "),
                     response=resp,
                 )
+            elif resp.status_code >= 400:
+                raise requests.HTTPError(
+                    f"{resp.status_code} for url: {url}", response=resp
+                )
             else:
-                resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, "html.parser")
                 return soup.get_text(separator=" ")
-        except requests.RequestException as e:
+        except Exception as e:
+            # curl_cffi raises its own exception types, so this stays broad;
+            # main() reports whatever comes out per team.
             last_error = e
 
         if attempt < MAX_ATTEMPTS:
@@ -284,14 +351,20 @@ def main():
     if failures:
         print(f"\nCompleted with issues for: {', '.join(failures)}", file=sys.stderr)
         if forbidden == len(TEAMS):
+            backend = "curl_cffi" if use_curl_cffi() else "requests"
             print(
-                "\nEvery request was rejected by the site's edge (403/429). The "
-                "request headers are not the problem on their own — the source "
-                "IP is likely blocked too. Options: override the User-Agent via "
-                "the SCRAPER_USER_AGENT env var, slow the run down via "
-                "SCRAPER_DELAY, or run the scraper from a network the site "
-                "accepts (self-hosted runner / outbound proxy) instead of a "
-                "GitHub-hosted runner.",
+                f"\nEvery request was rejected by the site's edge, using the "
+                f"{backend} backend. See the block diagnostics above: response "
+                "headers and body identify which product is refusing and why.\n"
+                "  - A JS/CAPTCHA challenge page means no HTTP client will get "
+                "through; it needs a real browser.\n"
+                "  - A bare deny with no challenge means the source IP is "
+                "blocked. GitHub-hosted runner ranges are widely blocklisted, "
+                "and nothing inside this script can change that — it needs a "
+                "self-hosted runner or an outbound proxy on an accepted "
+                "network.\n"
+                "Run the same script from a local machine to tell the two "
+                "apart: if it works there and not here, the block is the IP.",
                 file=sys.stderr,
             )
         sys.exit(1)

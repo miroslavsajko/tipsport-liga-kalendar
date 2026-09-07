@@ -35,6 +35,8 @@ jobs:
           SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
           SCRAPER_DELAY: ${{ vars.SCRAPER_DELAY }}
           SCRAPER_MAX_ATTEMPTS: ${{ vars.SCRAPER_MAX_ATTEMPTS }}
+          SCRAPER_IMPERSONATE: ${{ vars.SCRAPER_IMPERSONATE }}
+          SCRAPER_FORCE_REQUESTS: ${{ vars.SCRAPER_FORCE_REQUESTS }}
         run: python3 scripts/update_calendar.py
 
       - name: Commit and push if changed
