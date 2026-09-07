@@ -435,6 +435,37 @@ def venue_from(cells, pair):
     return ""
 
 
+def report_unknown_clubs(soup, target_team, matched) -> None:
+    """Warn about fixture rows whose clubs TEAMS does not recognise.
+
+    A club renamed on the site (a new sponsor, a curly apostrophe) matches
+    nothing in TEAMS, so its fixtures silently vanish from every opponent's
+    calendar while the count stays above MIN_GAMES. Losing six games
+    quietly is worse than a noisy warning.
+    """
+    unmatched = []
+    for tr in soup.find_all("tr"):
+        cells = [" ".join(c.get_text(" ").split()) for c in tr.find_all(["td", "th"])]
+        if len(cells) < 2:
+            continue
+        row_text = " ".join(cells)
+        # A fixture row always carries a date and a kickoff time.
+        if not (DATE_RE.search(row_text) and TIME_RE.search(row_text)):
+            continue
+        if len(teams_in(row_text)) < 2:
+            unmatched.append(row_text[:120])
+
+    if unmatched:
+        print(
+            f"WARNING: {target_team}: {len(unmatched)} fixture row(s) name a club "
+            f"missing from TEAMS, so those games are dropped (parsed {matched}). "
+            "A club was probably renamed on the site — update TEAMS. Sample rows:",
+            file=sys.stderr,
+        )
+        for row in unmatched[:3]:
+            print(f"  {row}", file=sys.stderr)
+
+
 def parse_games_from_rows(soup, target_team):
     """Read the schedule off the table rows.
 
@@ -516,6 +547,7 @@ def parse_games(html: str, target_team: str):
         if len(fallback) > len(games):
             return fallback
 
+    report_unknown_clubs(soup, target_team, len(games))
     return games
 
 
