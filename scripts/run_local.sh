@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
 # Scrape the calendars and push them to GitHub, from a machine on a
-# residential connection. Cloudflare challenges datacenter IPs (GitHub
-# Actions and Railway both get the interstitial), so this is the path that
-# actually works — see README.
+# residential connection. Cloudflare challenges datacenter IPs, so hosted
+# runners cannot do this — see README.
 #
-# Run it by hand, or on a schedule (cron / systemd timer / launchd /
-# Task Scheduler). Safe to run when nothing has changed: it commits only
-# when a calendar actually differs.
+# Run it by hand, or on a schedule of your own (cron / systemd timer /
+# launchd / Task Scheduler). Safe to run when nothing has changed: it
+# commits only when a calendar actually differs.
 #
 # Usage: scripts/run_local.sh [--no-push]
 

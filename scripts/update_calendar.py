@@ -47,7 +47,7 @@ def _env(name: str, default: str) -> str:
 
 
 USER_AGENT = _env("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT)
-# Where the .ics files land. Railway points this at a mounted volume.
+# Where the .ics files land; docs/ is what GitHub Pages serves.
 DOCS_DIR = Path(_env("SCRAPER_OUTPUT_DIR", str(DEFAULT_DOCS_DIR)))
 
 BROWSER_HEADERS = {
@@ -99,8 +99,8 @@ BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "
 # long-lived service solves the challenge once rather than on every scrape.
 BROWSER_PROFILE = _env("SCRAPER_BROWSER_PROFILE", "")
 # Outbound proxy, e.g. http://user:pass@host:port. Cloudflare challenges
-# datacenter IPs whatever the browser looks like, so routing through a
-# residential/ISP proxy is what makes a hosted deployment viable at all.
+# datacenter IPs whatever the browser looks like, so a run from anywhere but
+# a residential connection needs to route through one.
 PROXY = _env("SCRAPER_PROXY", "")
 # Seconds to let Cloudflare's interstitial run before giving up on a page.
 CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
