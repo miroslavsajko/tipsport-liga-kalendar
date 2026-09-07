@@ -35,3 +35,27 @@ daily-updated source.
 Note: only `hc-kosice.ics` is included in this initial commit (pre-built from
 the current schedule). The other 11 team files will appear in `docs/` after
 the workflow's first run (manual trigger or the next 06:00 UTC).
+
+## Troubleshooting: 403 from hockeyslovakia.sk
+The site sits behind a WAF that rejects requests that don't look like a real
+browser. The scraper therefore sends a full browser header set, reuses one
+`requests.Session` (warmed up on the site root so edge cookies are carried),
+retries `403`/`429`/`5xx` with exponential backoff, and pauses briefly between
+teams.
+
+If it starts returning 403 again, tune it without touching the code via
+repository variables (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCRAPER_USER_AGENT` | current Chrome UA string | Refresh the browser identity |
+| `SCRAPER_DELAY` | `1.5` | Seconds between team pages |
+| `SCRAPER_MAX_ATTEMPTS` | `4` | Retries per page |
+
+If *every* team fails with 403 even after that, the block is on the source IP,
+not the headers — GitHub-hosted runner ranges are widely blocklisted. The
+remaining options are a self-hosted runner or an outbound proxy on an
+acceptable network. The script prints this hint when all teams fail.
+
+A failed run never overwrites a good `.ics`: teams that error out, or that
+parse fewer than 40 games, are skipped and their existing file is left alone.
