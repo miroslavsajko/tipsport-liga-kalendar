@@ -5,7 +5,7 @@ CALSCALE:GREGORIAN
 X-WR-CALNAME:HC Slovan Bratislava - Tipsport liga
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-1-20260915@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260915T160000Z
 DTEND:20260915T183000Z
 SUMMARY:HK Nitra - HC Slovan Bratislava
@@ -13,7 +13,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 1, Tipsport lig
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-7-20260918@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260918T153000Z
 DTEND:20260918T180000Z
 SUMMARY:HK Dukla Michalovce - HC Slovan Bratislava
@@ -21,7 +21,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 7, Tipsport lig
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-13-20270207@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270207T150000Z
 DTEND:20270207T173000Z
 SUMMARY:HC Košice - HC Slovan Bratislava
@@ -29,7 +29,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 13, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-19-20260925@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260925T160000Z
 DTEND:20260925T183000Z
 SUMMARY:HKM Zvolen - HC Slovan Bratislava
@@ -37,7 +37,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 19, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-25-20260927@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260927T140000Z
 DTEND:20260927T163000Z
 SUMMARY:HK Poprad - HC Slovan Bratislava
@@ -45,7 +45,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 25, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-31-20261028@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261028T173000Z
 DTEND:20261028T200000Z
 SUMMARY:HC Slovan Bratislava - HK Dukla Trenčín
@@ -53,7 +53,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 31, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-37-20261002@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261002T153000Z
 DTEND:20261002T180000Z
 SUMMARY:Vlci Žilina - HC Slovan Bratislava
@@ -61,15 +61,23 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 37, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-43-20261004@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261004T140000Z
 DTEND:20261004T163000Z
 SUMMARY:HK Spišská Nová Ves - HC Slovan Bratislava
 DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 43, Tipsport liga). Súper: HK Spišská Nová Ves.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-49-20261009@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20261009T153000Z
+DTEND:20261009T180000Z
+SUMMARY:HC ‘05 TAM Banská Bystrica - HC Slovan Bratislava
+DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 49, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-55-20261011@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261011T140000Z
 DTEND:20261011T163000Z
 SUMMARY:HC Slovan Bratislava - HC Prešov
@@ -77,7 +85,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 55, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-61-20261016@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261016T160000Z
 DTEND:20261016T183000Z
 SUMMARY:HK 32 Liptovský Mikuláš - HC Slovan Bratislava
@@ -85,7 +93,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 61, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-67-20261018@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261018T140000Z
 DTEND:20261018T163000Z
 SUMMARY:HC Slovan Bratislava - HK Nitra
@@ -93,7 +101,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 67, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-73-20261023@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261023T153000Z
 DTEND:20261023T180000Z
 SUMMARY:HK Dukla Michalovce - HC Slovan Bratislava
@@ -101,7 +109,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 73, Tipsport li
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-79-20261025@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261025T150000Z
 DTEND:20261025T173000Z
 SUMMARY:HC Slovan Bratislava - HC Košice
@@ -109,7 +117,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 79, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-85-20261030@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261030T173000Z
 DTEND:20261030T200000Z
 SUMMARY:HC Slovan Bratislava - HKM Zvolen
@@ -117,7 +125,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 85, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-91-20261101@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261101T150000Z
 DTEND:20261101T173000Z
 SUMMARY:HC Slovan Bratislava - HK Poprad
@@ -125,7 +133,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 91, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-97-20261111@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261111T173000Z
 DTEND:20261111T200000Z
 SUMMARY:HC Slovan Bratislava - HK Dukla Trenčín
@@ -133,7 +141,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 97, Tipsport liga). Súper
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-103-20261213@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261213T150000Z
 DTEND:20261213T173000Z
 SUMMARY:HC Slovan Bratislava - Vlci Žilina
@@ -141,15 +149,23 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 103, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-109-20261115@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261115T150000Z
 DTEND:20261115T173000Z
 SUMMARY:HC Slovan Bratislava - HK Spišská Nová Ves
 DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 109, Tipsport liga). Súper: HK Spišská Nová Ves.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-115-20261117@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20261117T150000Z
+DTEND:20261117T173000Z
+SUMMARY:HC Slovan Bratislava - HC ‘05 TAM Banská Bystrica
+DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 115, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-121-20261121@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261121T180000Z
 DTEND:20261121T203000Z
 SUMMARY:HC Prešov - HC Slovan Bratislava
@@ -157,7 +173,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 121, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-127-20261124@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261124T173000Z
 DTEND:20261124T200000Z
 SUMMARY:HC Slovan Bratislava - HK 32 Liptovský Mikuláš
@@ -165,7 +181,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 127, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-133-20261127@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261127T170000Z
 DTEND:20261127T193000Z
 SUMMARY:HK Nitra - HC Slovan Bratislava
@@ -173,7 +189,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 133, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-139-20270216@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270216T173000Z
 DTEND:20270216T200000Z
 SUMMARY:HC Slovan Bratislava - HK Dukla Michalovce
@@ -181,7 +197,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 139, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-145-20260923@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260923T153000Z
 DTEND:20260923T180000Z
 SUMMARY:HC Košice - HC Slovan Bratislava
@@ -189,7 +205,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 145, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-151-20270214@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270214T150000Z
 DTEND:20270214T173000Z
 SUMMARY:HC Slovan Bratislava - HKM Zvolen
@@ -197,7 +213,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 151, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-157-20261215@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261215T173000Z
 DTEND:20261215T200000Z
 SUMMARY:HC Slovan Bratislava - HK Poprad
@@ -205,7 +221,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 157, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-163-20261218@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261218T170000Z
 DTEND:20261218T193000Z
 SUMMARY:HK Nitra - HC Slovan Bratislava
@@ -213,7 +229,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 163, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-169-20261220@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261220T150000Z
 DTEND:20261220T173000Z
 SUMMARY:HC Slovan Bratislava - HKM Zvolen
@@ -221,7 +237,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 169, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-175-20261222@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261222T163000Z
 DTEND:20261222T190000Z
 SUMMARY:Vlci Žilina - HC Slovan Bratislava
@@ -229,15 +245,23 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 175, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-181-20261226@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261226T150000Z
 DTEND:20261226T173000Z
 SUMMARY:HC Slovan Bratislava - HK Dukla Trenčín
 DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 181, Tipsport liga). Súper: HK Dukla Trenčín.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-187-20261228@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20261228T163000Z
+DTEND:20261228T190000Z
+SUMMARY:HC ‘05 TAM Banská Bystrica - HC Slovan Bratislava
+DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 187, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-193-20261230@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261230T173000Z
 DTEND:20261230T200000Z
 SUMMARY:HC Slovan Bratislava - HK Nitra
@@ -245,7 +269,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 193, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-199-20270103@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270103T160000Z
 DTEND:20270103T183000Z
 SUMMARY:HKM Zvolen - HC Slovan Bratislava
@@ -253,7 +277,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 199, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-205-20270105@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270105T173000Z
 DTEND:20270105T200000Z
 SUMMARY:HC Slovan Bratislava - Vlci Žilina
@@ -261,15 +285,23 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 205, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-211-20270108@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270108T170000Z
 DTEND:20270108T193000Z
 SUMMARY:HK Dukla Trenčín - HC Slovan Bratislava
 DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 211, Tipsport liga). Súper: HK Dukla Trenčín.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-217-20270109@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20270108T230000Z
+DTEND:20270109T013000Z
+SUMMARY:HC Slovan Bratislava - HC ‘05 TAM Banská Bystrica
+DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 217, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-223-20270115@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270115T170000Z
 DTEND:20270115T193000Z
 SUMMARY:HK Dukla Trenčín - HC Slovan Bratislava
@@ -277,7 +309,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 223, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-229-20270226@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270226T163000Z
 DTEND:20270226T190000Z
 SUMMARY:Vlci Žilina - HC Slovan Bratislava
@@ -285,15 +317,23 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 229, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-235-20270122@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270122T173000Z
 DTEND:20270122T200000Z
 SUMMARY:HC Slovan Bratislava - HK Spišská Nová Ves
 DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 235, Tipsport liga). Súper: HK Spišská Nová Ves.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-241-20270124@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20270124T150000Z
+DTEND:20270124T173000Z
+SUMMARY:HC Slovan Bratislava - HC ‘05 TAM Banská Bystrica
+DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 241, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-247-20270129@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270129T173000Z
 DTEND:20270129T200000Z
 SUMMARY:HC Slovan Bratislava - HC Prešov
@@ -301,7 +341,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 247, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-253-20270130@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270130T160000Z
 DTEND:20270130T183000Z
 SUMMARY:HK 32 Liptovský Mikuláš - HC Slovan Bratislava
@@ -309,7 +349,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 253, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-259-20270202@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270202T173000Z
 DTEND:20270202T200000Z
 SUMMARY:HC Slovan Bratislava - HK Nitra
@@ -317,7 +357,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 259, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-265-20270205@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270205T173000Z
 DTEND:20270205T200000Z
 SUMMARY:HC Slovan Bratislava - HK Dukla Michalovce
@@ -325,7 +365,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 265, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-271-20260920@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20260920T140000Z
 DTEND:20260920T163000Z
 SUMMARY:HC Slovan Bratislava - HC Košice
@@ -333,7 +373,7 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 271, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-277-20261206@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20261206T160000Z
 DTEND:20261206T183000Z
 SUMMARY:HKM Zvolen - HC Slovan Bratislava
@@ -341,7 +381,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 277, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-283-20270219@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270219T163000Z
 DTEND:20270219T190000Z
 SUMMARY:HK Poprad - HC Slovan Bratislava
@@ -349,7 +389,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 283, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-289-20270221@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270221T143000Z
 DTEND:20270221T170000Z
 SUMMARY:HK Dukla Trenčín - HC Slovan Bratislava
@@ -357,7 +397,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 289, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-295-20270117@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270117T150000Z
 DTEND:20270117T173000Z
 SUMMARY:HC Slovan Bratislava - Vlci Žilina
@@ -365,15 +405,23 @@ DESCRIPTION:Domáci zápas HC Slovan Bratislava (kolo 295, Tipsport liga). Súpe
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-301-20270228@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270228T150000Z
 DTEND:20270228T173000Z
 SUMMARY:HK Spišská Nová Ves - HC Slovan Bratislava
 DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 301, Tipsport liga). Súper: HK Spišská Nová Ves.
 END:VEVENT
 BEGIN:VEVENT
+UID:hc-slovan-bratislava-307-20270302@tipsportliga
+DTSTAMP:20260907T213429Z
+DTSTART:20270301T230000Z
+DTEND:20270302T013000Z
+SUMMARY:HC ‘05 TAM Banská Bystrica - HC Slovan Bratislava
+DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 307, Tipsport liga). Súper: HC ‘05 TAM Banská Bystrica.
+END:VEVENT
+BEGIN:VEVENT
 UID:hc-slovan-bratislava-313-20270305@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270305T170000Z
 DTEND:20270305T193000Z
 SUMMARY:HC Prešov - HC Slovan Bratislava
@@ -381,7 +429,7 @@ DESCRIPTION:Zápas HC Slovan Bratislava na ihrisku súpera (kolo 313, Tipsport l
 END:VEVENT
 BEGIN:VEVENT
 UID:hc-slovan-bratislava-319-20270307@tipsportliga
-DTSTAMP:20260907T195710Z
+DTSTAMP:20260907T213429Z
 DTSTART:20270307T150000Z
 DTEND:20270307T173000Z
 SUMMARY:HC Slovan Bratislava - HK 32 Liptovský Mikuláš
