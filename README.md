@@ -2,9 +2,19 @@
 
 Daily auto-updated `.ics` calendars — one per Tipsport liga team.
 
-- `scripts/update_calendar.py` — scrapes hockeyslovakia.sk and rebuilds one `.ics` per team in `docs/`
-- `.github/workflows/update-calendar.yml` — runs the script daily at 06:00 UTC (and on manual trigger)
+- `scripts/update_calendar.py` — scrapes hockeyslovakia.sk and rebuilds one `.ics` per team
+- `scripts/service.py` — the Railway service: scrapes on a schedule, serves the
+  `.ics` files over HTTP, pushes them back to this repo
+- `scripts/publish_github.py` — commits the scraped files to `docs/` on `main`
+- `Dockerfile` / `railway.json` — the Railway deployment
+- `.github/workflows/update-calendar.yml` — manual trigger only; the daily cron
+  is disabled because Cloudflare challenges GitHub-hosted runners
 - `docs/<team-slug>.ics` — the files GitHub Pages serves publicly
+
+**Where it runs:** scraping happens on Railway, because Cloudflare's managed
+challenge blocks GitHub Actions runners. Railway pushes the results back here,
+so the GitHub Pages URLs — and any existing calendar subscriptions — keep
+working, and it also serves them directly at its own domain.
 
 ## Team files
 | Team | File |
@@ -35,6 +45,65 @@ daily-updated source.
 Note: only `hc-kosice.ics` is included in this initial commit (pre-built from
 the current schedule). The other 11 team files will appear in `docs/` after
 the workflow's first run (manual trigger or the next 06:00 UTC).
+
+## Deploying on Railway
+
+The service is one always-on container: a background thread scrapes every
+`SCRAPE_INTERVAL_HOURS` and pushes to GitHub, while an HTTP server on `$PORT`
+serves the same files. `Dockerfile` builds it (Nixpacks will not install
+Chromium's system libraries, so the build is explicit) and `railway.json`
+points the healthcheck at `/healthz`.
+
+### 1. Create the service
+New Project → **Deploy from GitHub repo** → this repo. Railway detects the
+`Dockerfile` and builds it. The first build takes a few minutes: it installs
+Chromium and its system dependencies.
+
+### 2. Add a volume
+Service → **Variables/Settings → Volumes** → New Volume, **mount path `/data`**.
+This is required, not optional. It holds three things:
+
+| Path | Why it matters |
+|---|---|
+| `/data/ics` | The generated calendars, so a restart still serves them |
+| `/data/browser-profile` | Cloudflare's clearance cookie, so the challenge is solved once rather than on every scrape |
+| `/data/repo` | Scratch clone used when pushing to GitHub |
+
+### 3. Set variables
+Service → **Variables**. Only the two GitHub ones are required, and only
+because you asked for the push-back-to-GitHub half:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `GITHUB_TOKEN` | a fine-grained PAT | **Required for the push.** Scope it to this repo only, with `Contents: Read and write`. Nothing else. |
+| `GITHUB_REPOSITORY` | `miroslavsajko/tipsport-liga-kalendar` | Where to push |
+| `GIT_BRANCH` | `main` | Optional, defaults to `main` |
+| `SCRAPE_INTERVAL_HOURS` | `24` | Optional, defaults to 24 |
+| `SCRAPE_RETRY_MINUTES` | `60` | Optional; retry gap after a failed run |
+
+`SCRAPER_OUTPUT_DIR`, `SCRAPER_BROWSER_PROFILE`, `GIT_WORK_DIR` and `PORT` are
+already set in the `Dockerfile` and only need overriding if you move the mount.
+Leave `GITHUB_TOKEN` unset and the service still scrapes and serves — it just
+skips the push and says so in `/healthz`.
+
+### 4. Generate a domain
+Settings → **Networking → Generate Domain**. Railway injects `$PORT`; the
+service binds it. Then:
+
+- `https://<app>.up.railway.app/` — index of every team with last-updated times
+- `https://<app>.up.railway.app/hc-kosice.ics` — subscribe directly
+- `https://<app>.up.railway.app/healthz` — JSON status: last run, teams
+  written, failures, push result
+
+The first scrape starts in the background right after boot, so the port binds
+immediately and the healthcheck passes before any scraping finishes. Until the
+first run completes the index shows "not generated yet".
+
+### Cost note
+This is an always-on container sleeping most of the day for a once-daily job.
+On Railway's usage-based pricing that is small but not zero. Railway cron
+services would be cheaper, but they cannot also serve the files, and a fresh
+container each run would discard the Cloudflare clearance cookie.
 
 ## Troubleshooting: 403 from hockeyslovakia.sk
 The site sits behind a WAF that rejects requests that don't look like a real

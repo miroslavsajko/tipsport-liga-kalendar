@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+DEFAULT_DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 TZ = ZoneInfo("Europe/Bratislava")
 GAME_DURATION = timedelta(hours=2, minutes=30)
 
@@ -46,6 +46,8 @@ def _env(name: str, default: str) -> str:
 
 
 USER_AGENT = _env("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT)
+# Where the .ics files land. Railway points this at a mounted volume.
+DOCS_DIR = Path(_env("SCRAPER_OUTPUT_DIR", str(DEFAULT_DOCS_DIR)))
 
 BROWSER_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -92,6 +94,9 @@ BACKEND = _env("SCRAPER_BACKEND", "auto")
 # Override when the installed Chromium is not the build Playwright expects.
 BROWSER_PATH = _env("SCRAPER_BROWSER_PATH", "")
 BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "no")
+# A persistent profile keeps Cloudflare's clearance cookie between runs, so a
+# long-lived service solves the challenge once rather than on every scrape.
+BROWSER_PROFILE = _env("SCRAPER_BROWSER_PROFILE", "")
 # Seconds to let Cloudflare's interstitial run before giving up on a page.
 CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
 # Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
@@ -194,13 +199,26 @@ class BrowserSession:
         launch_kwargs = {"headless": BROWSER_HEADLESS}
         if BROWSER_PATH:
             launch_kwargs["executable_path"] = BROWSER_PATH
-        self._browser = self._pw.chromium.launch(**launch_kwargs)
-        self._ctx = self._browser.new_context(
-            locale="sk-SK",
-            timezone_id="Europe/Bratislava",
-            viewport={"width": 1366, "height": 900},
-        )
-        self._page = self._ctx.new_page()
+
+        context_kwargs = {
+            "locale": "sk-SK",
+            "timezone_id": "Europe/Bratislava",
+            "viewport": {"width": 1366, "height": 900},
+        }
+
+        if BROWSER_PROFILE:
+            # A persistent context *is* the browser, so there is no separate
+            # browser object to close later.
+            Path(BROWSER_PROFILE).mkdir(parents=True, exist_ok=True)
+            self._browser = None
+            self._ctx = self._pw.chromium.launch_persistent_context(
+                BROWSER_PROFILE, **launch_kwargs, **context_kwargs
+            )
+            self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+        else:
+            self._browser = self._pw.chromium.launch(**launch_kwargs)
+            self._ctx = self._browser.new_context(**context_kwargs)
+            self._page = self._ctx.new_page()
 
     def get(self, url: str, headers=None, timeout=None) -> _BrowserResponse:
         resp = self._page.goto(
@@ -219,7 +237,11 @@ class BrowserSession:
         return _BrowserResponse(status or 403, self._page.content())
 
     def close(self):
-        for closer in (self._ctx.close, self._browser.close, self._pw.stop):
+        closers = [self._ctx.close]
+        if self._browser is not None:
+            closers.append(self._browser.close)
+        closers.append(self._pw.stop)
+        for closer in closers:
             try:
                 closer()
             except Exception:
@@ -602,8 +624,15 @@ def build_ics(team_name: str, slug: str, games) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def main():
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+def scrape_all(out_dir=None):
+    """Scrape every team into out_dir. Returns (written, failures).
+
+    Split out of main() so a long-running service can call it directly
+    instead of shelling out to the script.
+    """
+    out_dir = Path(out_dir) if out_dir else DOCS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
     failures = []
     challenged = 0
     forbidden = 0
@@ -658,8 +687,9 @@ def main():
                     continue
 
                 ics_content = build_ics(team_name, slug, games)
-                out_path = DOCS_DIR / f"{slug}.ics"
+                out_path = out_dir / f"{slug}.ics"
                 out_path.write_text(ics_content, encoding="utf-8")
+                written.append(slug)
                 print(f"{team_name}: wrote {len(games)} games to {out_path}")
 
             except ChallengeError as e:
@@ -702,6 +732,13 @@ def main():
                 "network.",
                 file=sys.stderr,
             )
+
+    return written, failures
+
+
+def main():
+    _, failures = scrape_all()
+    if failures:
         sys.exit(1)
 
 

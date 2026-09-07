@@ -1,0 +1,5 @@
+.git
+.github
+docs/*.ics
+**/__pycache__
+*.pyc
