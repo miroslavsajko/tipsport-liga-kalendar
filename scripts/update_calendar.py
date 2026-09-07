@@ -91,7 +91,7 @@ FORCE_REQUESTS = _env("SCRAPER_FORCE_REQUESTS", "0") not in ("0", "false", "no")
 
 # name -> (team_id, slug)
 TEAMS = {
-    "HC '05 Banská Bystrica": (670399, "hc-05-banska-bystrica"),
+    "HC ‘05 TAM Banská Bystrica": (670399, "hc-05-banska-bystrica"),
     "HC Košice": (670395, "hc-kosice"),
     "HC Prešov": (670405, "hc-presov"),
     "HC Slovan Bratislava": (670394, "hc-slovan-bratislava"),
