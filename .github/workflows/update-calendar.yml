@@ -24,6 +24,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
+      - name: Install Chromium for Playwright
+        # Needed to clear Cloudflare's JS interstitial; the HTTP clients
+        # cannot, so without this the run stops at the challenge.
+        run: python -m playwright install --with-deps chromium
+
       - name: Run scraper
         id: scrape
         continue-on-error: true
@@ -37,6 +42,9 @@ jobs:
           SCRAPER_MAX_ATTEMPTS: ${{ vars.SCRAPER_MAX_ATTEMPTS }}
           SCRAPER_IMPERSONATE: ${{ vars.SCRAPER_IMPERSONATE }}
           SCRAPER_FORCE_REQUESTS: ${{ vars.SCRAPER_FORCE_REQUESTS }}
+          SCRAPER_BACKEND: ${{ vars.SCRAPER_BACKEND }}
+          SCRAPER_CHALLENGE_TIMEOUT: ${{ vars.SCRAPER_CHALLENGE_TIMEOUT }}
+          SCRAPER_BROWSER_HEADLESS: ${{ vars.SCRAPER_BROWSER_HEADLESS }}
         run: python3 scripts/update_calendar.py
 
       - name: Commit and push if changed

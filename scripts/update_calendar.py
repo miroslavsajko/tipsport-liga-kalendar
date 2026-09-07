@@ -86,6 +86,14 @@ MIN_GAMES = int(_env("SCRAPER_MIN_GAMES", "40"))
 # Where to save a page that would not parse, for offline inspection.
 DEBUG_DIR = _env("SCRAPER_DEBUG_DIR", "")
 IMPERSONATE = _env("SCRAPER_IMPERSONATE", "chrome")
+# Backend: auto | browser | curl_cffi | requests. "auto" starts on the cheap
+# HTTP client and escalates to a browser the moment Cloudflare challenges.
+BACKEND = _env("SCRAPER_BACKEND", "auto")
+# Override when the installed Chromium is not the build Playwright expects.
+BROWSER_PATH = _env("SCRAPER_BROWSER_PATH", "")
+BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "no")
+# Seconds to let Cloudflare's interstitial run before giving up on a page.
+CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
 # Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
 FORCE_REQUESTS = _env("SCRAPER_FORCE_REQUESTS", "0") not in ("0", "false", "no")
 
@@ -132,8 +140,119 @@ def team_page_url(team_id: int, slug: str) -> str:
     )
 
 
+class ChallengeError(RuntimeError):
+    """Cloudflare served its JS interstitial.
+
+    Retrying the same HTTP client is pointless — the challenge has to be
+    executed, not re-requested — so this escalates to a browser instead.
+    """
+
+
+CHALLENGE_MARKERS = (
+    "Just a moment",
+    "cf-browser-verification",
+    "challenge-platform",
+    "cf_chl_opt",
+)
+
+
+def looks_like_challenge(resp) -> bool:
+    try:
+        if (resp.headers.get("cf-mitigated") or "").lower() == "challenge":
+            return True
+    except Exception:
+        pass
+    try:
+        head = (resp.text or "")[:4000]
+    except Exception:
+        return False
+    return any(marker in head for marker in CHALLENGE_MARKERS)
+
+
+class _BrowserResponse:
+    """Enough of a requests.Response for fetch_page_html to treat alike."""
+
+    def __init__(self, status: int, text: str):
+        self.status_code = status
+        self.text = text
+        self.headers = {}
+        self.reason = ""
+
+
+class BrowserSession:
+    """Fetches pages in a real Chromium so the challenge JS actually runs.
+
+    One browser context is reused for every team: the clearance cookie
+    Cloudflare sets after the first solve is what makes the remaining
+    eleven pages ordinary requests.
+    """
+
+    def __init__(self):
+        from playwright.sync_api import sync_playwright
+
+        self._pw = sync_playwright().start()
+        launch_kwargs = {"headless": BROWSER_HEADLESS}
+        if BROWSER_PATH:
+            launch_kwargs["executable_path"] = BROWSER_PATH
+        self._browser = self._pw.chromium.launch(**launch_kwargs)
+        self._ctx = self._browser.new_context(
+            locale="sk-SK",
+            timezone_id="Europe/Bratislava",
+            viewport={"width": 1366, "height": 900},
+        )
+        self._page = self._ctx.new_page()
+
+    def get(self, url: str, headers=None, timeout=None) -> _BrowserResponse:
+        resp = self._page.goto(
+            url, wait_until="domcontentloaded", timeout=CHALLENGE_TIMEOUT * 1000
+        )
+        status = resp.status if resp is not None else 0
+
+        # Sit through the interstitial until the real document replaces it.
+        deadline = time.time() + CHALLENGE_TIMEOUT
+        while time.time() < deadline:
+            html = self._page.content()
+            if not any(marker in html[:4000] for marker in CHALLENGE_MARKERS):
+                return _BrowserResponse(200, html)
+            self._page.wait_for_timeout(1000)
+
+        return _BrowserResponse(status or 403, self._page.content())
+
+    def close(self):
+        for closer in (self._ctx.close, self._browser.close, self._pw.stop):
+            try:
+                closer()
+            except Exception:
+                pass
+
+
+def browser_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def use_curl_cffi() -> bool:
+    if BACKEND in ("requests", "browser"):
+        return False
     return curl_requests is not None and not FORCE_REQUESTS
+
+
+def build_browser_session():
+    session = BrowserSession()
+    print(
+        f"HTTP backend: playwright chromium "
+        f"(headless={BROWSER_HEADLESS}, challenge timeout={CHALLENGE_TIMEOUT}s)",
+        file=sys.stderr,
+    )
+    try:
+        session.get(f"{BASE_URL}/sk/")
+    except Exception as e:
+        print(f"WARNING: browser warm-up failed: {e}", file=sys.stderr)
+    return session
 
 
 def build_session():
@@ -143,6 +262,9 @@ def build_session():
     request, and following requests that carry them are treated as an
     ongoing browsing session rather than a bare hit on a deep URL.
     """
+    if BACKEND == "browser":
+        return build_browser_session()
+
     if use_curl_cffi():
         # Impersonation supplies its own coherent header set; overriding it
         # piecemeal is what makes a fingerprint look stitched together.
@@ -212,6 +334,11 @@ def fetch_page_html(session, url: str) -> str:
                 headers={"Referer": f"{BASE_URL}/sk/"},
                 timeout=REQUEST_TIMEOUT,
             )
+            if looks_like_challenge(resp):
+                report_block(resp)
+                raise ChallengeError(
+                    f"Cloudflare challenge for url: {url}"
+                )
             if resp.status_code in RETRY_STATUSES:
                 report_block(resp)
                 reason = getattr(resp, "reason", "") or ""
@@ -225,6 +352,8 @@ def fetch_page_html(session, url: str) -> str:
                 )
             else:
                 return resp.text
+        except ChallengeError:
+            raise
         except Exception as e:
             # curl_cffi raises its own exception types, so this stays broad;
             # main() reports whatever comes out per team.
@@ -476,62 +605,114 @@ def build_ics(team_name: str, slug: str, games) -> str:
 def main():
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     failures = []
+    challenged = 0
     forbidden = 0
     session = build_session()
+    escalated = BACKEND == "browser"
 
-    for i, (team_name, (team_id, slug)) in enumerate(TEAMS.items()):
-        if i:
-            time.sleep(PER_TEAM_DELAY)
+    try:
+        for i, (team_name, (team_id, slug)) in enumerate(TEAMS.items()):
+            if i:
+                time.sleep(PER_TEAM_DELAY)
 
-        url = team_page_url(team_id, slug)
-        try:
-            html = fetch_page_html(session, url)
-            games = parse_games(html, team_name)
+            url = team_page_url(team_id, slug)
+            try:
+                try:
+                    html = fetch_page_html(session, url)
+                except ChallengeError:
+                    # An HTTP client cannot clear the interstitial, so swap
+                    # in a real browser once and carry it for the rest of
+                    # the run — the clearance cookie makes the remaining
+                    # pages ordinary requests.
+                    if escalated or BACKEND not in ("auto", "browser"):
+                        raise
+                    if not browser_available():
+                        raise ChallengeError(
+                            "Cloudflare challenge, and Playwright is not "
+                            "installed to clear it (pip install playwright "
+                            "&& playwright install chromium)"
+                        )
+                    print(
+                        "\nCloudflare challenge detected — escalating to a "
+                        "real browser for the rest of the run.\n",
+                        file=sys.stderr,
+                    )
+                    close_session(session)
+                    session = build_browser_session()
+                    escalated = True
+                    html = fetch_page_html(session, url)
 
-            if len(games) < MIN_GAMES:
-                # Skip this team rather than overwrite a good file with a
-                # broken one, and dump the page so the shape can be seen.
-                print(
-                    f"WARNING: {team_name}: only parsed {len(games)} games, "
-                    "expected ~54. Skipping this team's file.",
-                    file=sys.stderr,
-                )
-                dump_page(slug, html)
+                games = parse_games(html, team_name)
+
+                if len(games) < MIN_GAMES:
+                    # Skip this team rather than overwrite a good file with
+                    # a broken one, and dump the page so the shape can be
+                    # seen.
+                    print(
+                        f"WARNING: {team_name}: only parsed {len(games)} games, "
+                        "expected ~54. Skipping this team's file.",
+                        file=sys.stderr,
+                    )
+                    dump_page(slug, html)
+                    failures.append(team_name)
+                    continue
+
+                ics_content = build_ics(team_name, slug, games)
+                out_path = DOCS_DIR / f"{slug}.ics"
+                out_path.write_text(ics_content, encoding="utf-8")
+                print(f"{team_name}: wrote {len(games)} games to {out_path}")
+
+            except ChallengeError as e:
+                challenged += 1
+                print(f"ERROR: {team_name}: {e}", file=sys.stderr)
                 failures.append(team_name)
-                continue
-
-            ics_content = build_ics(team_name, slug, games)
-            out_path = DOCS_DIR / f"{slug}.ics"
-            out_path.write_text(ics_content, encoding="utf-8")
-            print(f"{team_name}: wrote {len(games)} games to {out_path}")
-
-        except Exception as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            if status in (403, 429):
-                forbidden += 1
-            print(f"ERROR: {team_name}: {e}", file=sys.stderr)
-            failures.append(team_name)
+            except Exception as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status in (403, 429):
+                    forbidden += 1
+                print(f"ERROR: {team_name}: {e}", file=sys.stderr)
+                failures.append(team_name)
+    finally:
+        close_session(session)
 
     if failures:
         print(f"\nCompleted with issues for: {', '.join(failures)}", file=sys.stderr)
-        if forbidden == len(TEAMS):
+        if challenged:
+            print(
+                "\nCloudflare served its JS interstitial and the browser did "
+                "not clear it. A headless browser on a datacenter IP is "
+                "exactly what a managed challenge targets, so the remaining "
+                "options are:\n"
+                "  - Run headed under xvfb (SCRAPER_BROWSER_HEADLESS=0 with "
+                "xvfb-run), which some managed challenges accept.\n"
+                "  - Run from a residential IP: a self-hosted runner, or a "
+                "local cron that commits the .ics files.\n"
+                "  - Ask hockeyslovakia.sk to allowlist the scraper, or use a "
+                "feed they publish for the purpose.",
+                file=sys.stderr,
+            )
+        elif forbidden == len(TEAMS):
             backend = "curl_cffi" if use_curl_cffi() else "requests"
             print(
-                f"\nEvery request was rejected by the site's edge, using the "
-                f"{backend} backend. See the block diagnostics above: response "
-                "headers and body identify which product is refusing and why.\n"
-                "  - A JS/CAPTCHA challenge page means no HTTP client will get "
-                "through; it needs a real browser.\n"
-                "  - A bare deny with no challenge means the source IP is "
-                "blocked. GitHub-hosted runner ranges are widely blocklisted, "
-                "and nothing inside this script can change that — it needs a "
+                f"\nEvery request was refused by the site's edge, using the "
+                f"{backend} backend, with no challenge page. That is an IP "
+                "block: GitHub-hosted runner ranges are widely blocklisted, "
+                "and nothing inside this script can change it — it needs a "
                 "self-hosted runner or an outbound proxy on an accepted "
-                "network.\n"
-                "Run the same script from a local machine to tell the two "
-                "apart: if it works there and not here, the block is the IP.",
+                "network.",
                 file=sys.stderr,
             )
         sys.exit(1)
+
+
+def close_session(session) -> None:
+    for name in ("close",):
+        closer = getattr(session, name, None)
+        if closer is not None:
+            try:
+                closer()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

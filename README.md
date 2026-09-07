@@ -55,12 +55,34 @@ repository variables (Settings → Secrets and variables → Actions → Variabl
 | `SCRAPER_FORCE_REQUESTS` | `0` | Set to `1` to bypass curl_cffi and use plain `requests` |
 | `SCRAPER_MIN_GAMES` | `40` | Below this a team is treated as a parse failure |
 | `SCRAPER_DEBUG_DIR` | temp dir | Where an unparseable page is saved for inspection |
+| `SCRAPER_BACKEND` | `auto` | `auto`, `browser`, `curl_cffi` or `requests` |
+| `SCRAPER_CHALLENGE_TIMEOUT` | `45` | Seconds to let the interstitial run |
+| `SCRAPER_BROWSER_HEADLESS` | `1` | `0` runs headed (pair with `xvfb-run`) |
+| `SCRAPER_BROWSER_PATH` | Playwright's | Override the Chromium binary path |
 
-Headers alone were not enough, so the scraper prefers **curl_cffi**, which
-replays a real Chrome TLS/HTTP2 fingerprint. Bot-management products match on
-that fingerprint (JA3) regardless of how browser-like the headers are, and
-plain `requests` has an obvious one. It falls back to `requests` if curl_cffi
-is unavailable; the log line `HTTP backend: ...` says which was used.
+The site is behind **Cloudflare**, which serves a JS interstitial
+(`cf-mitigated: challenge`, "Just a moment..."). No HTTP client can clear
+that — the challenge has to be executed, not re-requested — so the scraper
+escalates through three backends:
+
+1. **curl_cffi** — replays a real Chrome TLS/HTTP2 fingerprint. Bot
+   management matches on that fingerprint (JA3) whatever the headers say, and
+   plain `requests` has an obvious one.
+2. **requests** — fallback when curl_cffi is unavailable.
+3. **Playwright Chromium** — a real browser, used automatically the moment a
+   challenge is detected. One browser context is reused across all teams, so
+   the clearance cookie from the first solve makes the other eleven pages
+   ordinary requests.
+
+The log line `HTTP backend: ...` says which is in use, and a challenge prints
+`escalating to a real browser`. Set `SCRAPER_BACKEND=browser` to skip straight
+to Chromium.
+
+**Caveat:** a headless browser on a datacenter IP is exactly what a Cloudflare
+managed challenge targets, so this can still fail on GitHub-hosted runners. If
+it does, the script says so and lists the options: headed under `xvfb-run`
+(`SCRAPER_BROWSER_HEADLESS=0`), a self-hosted runner or local cron on a
+residential IP, or asking the site to allowlist the scraper.
 
 When a request is refused, the script dumps the first blocked response —
 status, telltale headers (`server`, `cf-ray`, `x-iinfo`, …) and a body
