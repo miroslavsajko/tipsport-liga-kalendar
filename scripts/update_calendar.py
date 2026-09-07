@@ -12,6 +12,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,7 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+DEFAULT_DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 TZ = ZoneInfo("Europe/Bratislava")
 GAME_DURATION = timedelta(hours=2, minutes=30)
 
@@ -45,6 +46,8 @@ def _env(name: str, default: str) -> str:
 
 
 USER_AGENT = _env("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT)
+# Where the .ics files land. Railway points this at a mounted volume.
+DOCS_DIR = Path(_env("SCRAPER_OUTPUT_DIR", str(DEFAULT_DOCS_DIR)))
 
 BROWSER_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -63,6 +66,15 @@ BROWSER_HEADERS = {
     "Connection": "keep-alive",
 }
 
+# Plain `requests` has a distinctive TLS/HTTP2 fingerprint (JA3) that bot
+# management products match on regardless of how browser-like the headers
+# are. curl_cffi replays a real Chrome fingerprint, which is the only way
+# to get past that from Python without driving an actual browser.
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # optional — the script still runs on plain requests
+    curl_requests = None
+
 # Status codes worth retrying: WAF/rate-limit pushback and transient 5xx.
 RETRY_STATUSES = {403, 408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = int(_env("SCRAPER_MAX_ATTEMPTS", "4"))
@@ -70,10 +82,29 @@ REQUEST_TIMEOUT = int(_env("SCRAPER_TIMEOUT", "30"))
 # Politeness delay between team pages, so a dozen hits in a row do not
 # look like a burst to the rate limiter.
 PER_TEAM_DELAY = float(_env("SCRAPER_DELAY", "1.5"))
+# Browser profile curl_cffi impersonates; "chrome" tracks its newest build.
+# A full season is ~54 games; far fewer means parsing broke.
+MIN_GAMES = int(_env("SCRAPER_MIN_GAMES", "40"))
+# Where to save a page that would not parse, for offline inspection.
+DEBUG_DIR = _env("SCRAPER_DEBUG_DIR", "")
+IMPERSONATE = _env("SCRAPER_IMPERSONATE", "chrome")
+# Backend: auto | browser | curl_cffi | requests. "auto" starts on the cheap
+# HTTP client and escalates to a browser the moment Cloudflare challenges.
+BACKEND = _env("SCRAPER_BACKEND", "auto")
+# Override when the installed Chromium is not the build Playwright expects.
+BROWSER_PATH = _env("SCRAPER_BROWSER_PATH", "")
+BROWSER_HEADLESS = _env("SCRAPER_BROWSER_HEADLESS", "1") not in ("0", "false", "no")
+# A persistent profile keeps Cloudflare's clearance cookie between runs, so a
+# long-lived service solves the challenge once rather than on every scrape.
+BROWSER_PROFILE = _env("SCRAPER_BROWSER_PROFILE", "")
+# Seconds to let Cloudflare's interstitial run before giving up on a page.
+CHALLENGE_TIMEOUT = int(_env("SCRAPER_CHALLENGE_TIMEOUT", "45"))
+# Set to 1 to skip curl_cffi and use plain requests (for comparing the two).
+FORCE_REQUESTS = _env("SCRAPER_FORCE_REQUESTS", "0") not in ("0", "false", "no")
 
 # name -> (team_id, slug)
 TEAMS = {
-    "HC '05 Banská Bystrica": (670399, "hc-05-banska-bystrica"),
+    "HC ‘05 TAM Banská Bystrica": (670399, "hc-05-banska-bystrica"),
     "HC Košice": (670395, "hc-kosice"),
     "HC Prešov": (670405, "hc-presov"),
     "HC Slovan Bratislava": (670394, "hc-slovan-bratislava"),
@@ -90,7 +121,12 @@ TEAMS = {
 TEAM_NAMES = sorted(TEAMS.keys(), key=len, reverse=True)
 TEAM_ALT = "|".join(re.escape(t) for t in TEAM_NAMES)
 
-# Matches a single schedule row as it appears in the flattened page text:
+DATE_RE = re.compile(r"(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})")
+TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
+TEAM_FIND_RE = re.compile(TEAM_ALT)
+
+# Fallback only — see parse_games. Matches a schedule row as it appears in
+# the flattened page text, which breaks on any column or markup change:
 #   - <round> <home x3> VS <time> <date> <away x3> <weekday> <date> <date> <time> <venue...>
 ROW_RE = re.compile(
     r"-\s*(\d+)\s+"
@@ -109,30 +145,208 @@ def team_page_url(team_id: int, slug: str) -> str:
     )
 
 
-def build_session() -> requests.Session:
-    """A session with browser-like headers, warmed up on the site root.
+class ChallengeError(RuntimeError):
+    """Cloudflare served its JS interstitial.
+
+    Retrying the same HTTP client is pointless — the challenge has to be
+    executed, not re-requested — so this escalates to a browser instead.
+    """
+
+
+CHALLENGE_MARKERS = (
+    "Just a moment",
+    "cf-browser-verification",
+    "challenge-platform",
+    "cf_chl_opt",
+)
+
+
+def looks_like_challenge(resp) -> bool:
+    try:
+        if (resp.headers.get("cf-mitigated") or "").lower() == "challenge":
+            return True
+    except Exception:
+        pass
+    try:
+        head = (resp.text or "")[:4000]
+    except Exception:
+        return False
+    return any(marker in head for marker in CHALLENGE_MARKERS)
+
+
+class _BrowserResponse:
+    """Enough of a requests.Response for fetch_page_html to treat alike."""
+
+    def __init__(self, status: int, text: str):
+        self.status_code = status
+        self.text = text
+        self.headers = {}
+        self.reason = ""
+
+
+class BrowserSession:
+    """Fetches pages in a real Chromium so the challenge JS actually runs.
+
+    One browser context is reused for every team: the clearance cookie
+    Cloudflare sets after the first solve is what makes the remaining
+    eleven pages ordinary requests.
+    """
+
+    def __init__(self):
+        from playwright.sync_api import sync_playwright
+
+        self._pw = sync_playwright().start()
+        launch_kwargs = {"headless": BROWSER_HEADLESS}
+        if BROWSER_PATH:
+            launch_kwargs["executable_path"] = BROWSER_PATH
+
+        context_kwargs = {
+            "locale": "sk-SK",
+            "timezone_id": "Europe/Bratislava",
+            "viewport": {"width": 1366, "height": 900},
+        }
+
+        if BROWSER_PROFILE:
+            # A persistent context *is* the browser, so there is no separate
+            # browser object to close later.
+            Path(BROWSER_PROFILE).mkdir(parents=True, exist_ok=True)
+            self._browser = None
+            self._ctx = self._pw.chromium.launch_persistent_context(
+                BROWSER_PROFILE, **launch_kwargs, **context_kwargs
+            )
+            self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+        else:
+            self._browser = self._pw.chromium.launch(**launch_kwargs)
+            self._ctx = self._browser.new_context(**context_kwargs)
+            self._page = self._ctx.new_page()
+
+    def get(self, url: str, headers=None, timeout=None) -> _BrowserResponse:
+        resp = self._page.goto(
+            url, wait_until="domcontentloaded", timeout=CHALLENGE_TIMEOUT * 1000
+        )
+        status = resp.status if resp is not None else 0
+
+        # Sit through the interstitial until the real document replaces it.
+        deadline = time.time() + CHALLENGE_TIMEOUT
+        while time.time() < deadline:
+            html = self._page.content()
+            if not any(marker in html[:4000] for marker in CHALLENGE_MARKERS):
+                return _BrowserResponse(200, html)
+            self._page.wait_for_timeout(1000)
+
+        return _BrowserResponse(status or 403, self._page.content())
+
+    def close(self):
+        closers = [self._ctx.close]
+        if self._browser is not None:
+            closers.append(self._browser.close)
+        closers.append(self._pw.stop)
+        for closer in closers:
+            try:
+                closer()
+            except Exception:
+                pass
+
+
+def browser_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def use_curl_cffi() -> bool:
+    if BACKEND in ("requests", "browser"):
+        return False
+    return curl_requests is not None and not FORCE_REQUESTS
+
+
+def build_browser_session():
+    session = BrowserSession()
+    print(
+        f"HTTP backend: playwright chromium "
+        f"(headless={BROWSER_HEADLESS}, challenge timeout={CHALLENGE_TIMEOUT}s)",
+        file=sys.stderr,
+    )
+    try:
+        session.get(f"{BASE_URL}/sk/")
+    except Exception as e:
+        print(f"WARNING: browser warm-up failed: {e}", file=sys.stderr)
+    return session
+
+
+def build_session():
+    """A browser-like session, warmed up on the site root.
 
     The warm-up matters: the edge sets cookies on the first document
     request, and following requests that carry them are treated as an
     ongoing browsing session rather than a bare hit on a deep URL.
     """
-    session = requests.Session()
-    session.headers.update(BROWSER_HEADERS)
+    if BACKEND == "browser":
+        return build_browser_session()
+
+    if use_curl_cffi():
+        # Impersonation supplies its own coherent header set; overriding it
+        # piecemeal is what makes a fingerprint look stitched together.
+        session = curl_requests.Session(impersonate=IMPERSONATE)
+        session.headers.update({"Accept-Language": BROWSER_HEADERS["Accept-Language"]})
+        print(f"HTTP backend: curl_cffi (impersonate={IMPERSONATE})", file=sys.stderr)
+    else:
+        session = requests.Session()
+        session.headers.update(BROWSER_HEADERS)
+        reason = "forced" if FORCE_REQUESTS else "curl_cffi not installed"
+        print(f"HTTP backend: requests ({reason})", file=sys.stderr)
 
     try:
-        session.get(
-            f"{BASE_URL}/sk/",
-            headers={"Sec-Fetch-Site": "none"},
-            timeout=REQUEST_TIMEOUT,
-        )
-    except requests.RequestException as e:
+        session.get(f"{BASE_URL}/sk/", timeout=REQUEST_TIMEOUT)
+    except Exception as e:
         # Not fatal — the team pages may still work.
         print(f"WARNING: warm-up request failed: {e}", file=sys.stderr)
 
     return session
 
 
-def fetch_page_text(session: requests.Session, url: str) -> str:
+_block_reported = False
+
+
+def report_block(resp) -> None:
+    """Dump the first refused response so the blocker can be identified.
+
+    Which product is saying no, and why, decides the fix: a JS/CAPTCHA
+    challenge needs a real browser, a plain IP deny needs a different
+    network. Guessing between them from a bare status code is what makes
+    this class of bug drag on.
+    """
+    global _block_reported
+    if _block_reported or resp is None:
+        return
+    _block_reported = True
+
+    interesting = {
+        "server", "cf-ray", "cf-mitigated", "cf-cache-status", "x-iinfo",
+        "x-cdn", "x-sucuri-id", "x-amz-cf-id", "via", "retry-after",
+        "content-type", "set-cookie", "x-request-id", "x-powered-by",
+}
+
+    print("\n--- block diagnostics (first refused response) ---", file=sys.stderr)
+    print(f"status: {getattr(resp, 'status_code', '?')}", file=sys.stderr)
+    try:
+        for k, v in resp.headers.items():
+            if k.lower() in interesting:
+                print(f"header: {k}: {v}", file=sys.stderr)
+    except Exception as e:
+        print(f"(could not read response headers: {e})", file=sys.stderr)
+    try:
+        body = " ".join((resp.text or "").split())[:800]
+        print(f"body[:800]: {body}", file=sys.stderr)
+    except Exception as e:
+        print(f"(could not read response body: {e})", file=sys.stderr)
+    print("--- end diagnostics ---\n", file=sys.stderr)
+
+
+def fetch_page_html(session, url: str) -> str:
     last_error = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -142,16 +356,29 @@ def fetch_page_text(session: requests.Session, url: str) -> str:
                 headers={"Referer": f"{BASE_URL}/sk/"},
                 timeout=REQUEST_TIMEOUT,
             )
+            if looks_like_challenge(resp):
+                report_block(resp)
+                raise ChallengeError(
+                    f"Cloudflare challenge for url: {url}"
+                )
             if resp.status_code in RETRY_STATUSES:
+                report_block(resp)
+                reason = getattr(resp, "reason", "") or ""
                 last_error = requests.HTTPError(
-                    f"{resp.status_code} {resp.reason} for url: {url}",
+                    f"{resp.status_code} {reason} for url: {url}".replace("  ", " "),
                     response=resp,
                 )
+            elif resp.status_code >= 400:
+                raise requests.HTTPError(
+                    f"{resp.status_code} for url: {url}", response=resp
+                )
             else:
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
-                return soup.get_text(separator=" ")
-        except requests.RequestException as e:
+                return resp.text
+        except ChallengeError:
+            raise
+        except Exception as e:
+            # curl_cffi raises its own exception types, so this stays broad;
+            # main() reports whatever comes out per team.
             last_error = e
 
         if attempt < MAX_ATTEMPTS:
@@ -167,7 +394,131 @@ def fetch_page_text(session: requests.Session, url: str) -> str:
     raise last_error
 
 
-def parse_games(page_text: str, target_team: str):
+def teams_in(text: str):
+    """Team names in order of appearance, with consecutive repeats collapsed.
+
+    A row names each club several times over (crest alt text, short name,
+    full name), so only the transitions between clubs carry information.
+    """
+    found = []
+    for m in TEAM_FIND_RE.finditer(text):
+        name = m.group(0)
+        if not found or found[-1] != name:
+            found.append(name)
+    return found
+
+
+def round_from(cells):
+    """Round number: the first standalone small integer cell, if any."""
+    for cell in cells:
+        if cell.isdigit() and len(cell) <= 3:
+            return int(cell)
+    return None
+
+
+def venue_from(cells, pair):
+    """Best-effort venue: the last cell that is not a team, date, time or number."""
+    for cell in reversed(cells):
+        # Skip separator and label cells ("VS", "-", a lone weekday).
+        if len(cell) < 4 or cell.isdigit():
+            continue
+        if DATE_RE.search(cell) or TIME_RE.search(cell):
+            continue
+        # A venue legitimately contains a club name ("Zimný štadión HC
+        # Košice"), so only reject a cell that is *nothing but* club names.
+        remainder = cell
+        for team in pair:
+            remainder = remainder.replace(team, " ")
+        if len(remainder.strip()) < 4:
+            continue
+        return cell
+    return ""
+
+
+def report_unknown_clubs(soup, target_team, matched) -> None:
+    """Warn about fixture rows whose clubs TEAMS does not recognise.
+
+    A club renamed on the site (a new sponsor, a curly apostrophe) matches
+    nothing in TEAMS, so its fixtures silently vanish from every opponent's
+    calendar while the count stays above MIN_GAMES. Losing six games
+    quietly is worse than a noisy warning.
+    """
+    unmatched = []
+    for tr in soup.find_all("tr"):
+        cells = [" ".join(c.get_text(" ").split()) for c in tr.find_all(["td", "th"])]
+        if len(cells) < 2:
+            continue
+        row_text = " ".join(cells)
+        # A fixture row always carries a date and a kickoff time.
+        if not (DATE_RE.search(row_text) and TIME_RE.search(row_text)):
+            continue
+        if len(teams_in(row_text)) < 2:
+            unmatched.append(row_text[:120])
+
+    if unmatched:
+        print(
+            f"WARNING: {target_team}: {len(unmatched)} fixture row(s) name a club "
+            f"missing from TEAMS, so those games are dropped (parsed {matched}). "
+            "A club was probably renamed on the site — update TEAMS. Sample rows:",
+            file=sys.stderr,
+        )
+        for row in unmatched[:3]:
+            print(f"  {row}", file=sys.stderr)
+
+
+def parse_games_from_rows(soup, target_team):
+    """Read the schedule off the table rows.
+
+    Structural rather than positional: a row counts if it names two clubs,
+    a date and a time, whatever order its columns are in. Reordered or
+    added columns then no longer take the whole parse to zero, which is
+    what a single flattened-text regex does.
+    """
+    games = []
+    seen = set()
+
+    for tr in soup.find_all("tr"):
+        cells = [" ".join(c.get_text(" ").split()) for c in tr.find_all(["td", "th"])]
+        if len(cells) < 2:
+            continue
+        row_text = " ".join(cells)
+
+        pair = teams_in(row_text)
+        # Home first, away second — the order the fixture is written in.
+        if len(pair) < 2 or target_team not in pair[:2]:
+            continue
+
+        date_m = DATE_RE.search(row_text)
+        time_m = TIME_RE.search(row_text)
+        if not date_m or not time_m:
+            continue
+
+        d, mo, y = (int(x) for x in date_m.groups())
+        date_str = f"{d:02d}.{mo:02d}.{y}"
+        time_str = f"{int(time_m.group(1)):02d}:{time_m.group(2)}"
+
+        home, away = pair[0], pair[1]
+        key = (date_str, home, away)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        games.append(
+            {
+                "round": round_from(cells),
+                "is_home": home == target_team,
+                "opponent": away if home == target_team else home,
+                "date": date_str,
+                "time": time_str,
+                "venue": venue_from(cells, (home, away)),
+            }
+        )
+
+    return games
+
+
+def parse_games_from_text(page_text: str, target_team: str):
+    """Legacy fallback for a page whose fixtures are not in a table."""
     games = []
     for m in ROW_RE.finditer(page_text):
         round_no, home_team, time_str, date_str, away_team, venue = m.groups()
@@ -185,6 +536,61 @@ def parse_games(page_text: str, target_team: str):
             }
         )
     return games
+
+
+def parse_games(html: str, target_team: str):
+    soup = BeautifulSoup(html, "html.parser")
+    games = parse_games_from_rows(soup, target_team)
+
+    if len(games) < MIN_GAMES:
+        fallback = parse_games_from_text(soup.get_text(separator=" "), target_team)
+        if len(fallback) > len(games):
+            return fallback
+
+    report_unknown_clubs(soup, target_team, len(games))
+    return games
+
+
+_page_dumped = False
+
+
+def dump_page(slug: str, html: str) -> None:
+    """Save and summarise a page that would not parse.
+
+    Whether the markup changed shape or the fixtures are not in the HTML
+    at all (rendered client-side) decides the fix, and the game count
+    alone does not distinguish them.
+    """
+    global _page_dumped
+    if _page_dumped:
+        return
+    _page_dumped = True
+
+    soup = BeautifulSoup(html, "html.parser")
+    text = " ".join(soup.get_text(separator=" ").split())
+
+    print(
+        "\n--- page diagnostics (first team that parsed too few games) ---",
+        file=sys.stderr,
+    )
+    print(f"html length: {len(html)}", file=sys.stderr)
+    print(
+        f"tables: {len(soup.find_all('table'))}, "
+        f"rows: {len(soup.find_all('tr'))}, "
+        f"team-name mentions: {len(TEAM_FIND_RE.findall(text))}",
+        file=sys.stderr,
+    )
+    print(f"text[:1200]: {text[:1200]}", file=sys.stderr)
+
+    target = Path(DEBUG_DIR) if DEBUG_DIR else Path(tempfile.gettempdir())
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        out = target / f"{slug}.debug.html"
+        out.write_text(html, encoding="utf-8")
+        print(f"saved raw HTML to {out}", file=sys.stderr)
+    except OSError as e:
+        print(f"(could not save raw HTML: {e})", file=sys.stderr)
+    print("--- end page diagnostics ---\n", file=sys.stderr)
 
 
 def to_utc(date_str: str, time_str: str) -> datetime:
@@ -212,18 +618,26 @@ def build_ics(team_name: str, slug: str, games) -> str:
         start_utc = to_utc(g["date"], g["time"])
         end_utc = start_utc + GAME_DURATION
         d, mo, y = g["date"].split(".")
-        uid = f"{slug}-{g['round']}-{y}{mo}{d}@tipsportliga"
+        # Round is not always present in the markup; the date plus the
+        # opponent still identifies the fixture uniquely, and the UID has
+        # to stay stable so subscribers do not see duplicate events.
+        if g["round"] is None:
+            opp_key = re.sub(r"[^a-z0-9]+", "", g["opponent"].lower())
+            uid = f"{slug}-{y}{mo}{d}-{opp_key}@tipsportliga"
+        else:
+            uid = f"{slug}-{g['round']}-{y}{mo}{d}@tipsportliga"
 
+        round_part = f"kolo {g['round']}, " if g["round"] is not None else ""
         if g["is_home"]:
             summary = f"{team_name} - {g['opponent']}"
             desc = (
-                f"Domáci zápas {team_name} (kolo {g['round']}, Tipsport liga). "
+                f"Domáci zápas {team_name} ({round_part}Tipsport liga). "
                 f"Súper: {g['opponent']}."
             )
         else:
             summary = f"{g['opponent']} - {team_name}"
             desc = (
-                f"Zápas {team_name} na ihrisku súpera (kolo {g['round']}, "
+                f"Zápas {team_name} na ihrisku súpera ({round_part}"
                 f"Tipsport liga). Súper: {g['opponent']}."
             )
 
@@ -242,59 +656,132 @@ def build_ics(team_name: str, slug: str, games) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def main():
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+def scrape_all(out_dir=None):
+    """Scrape every team into out_dir. Returns (written, failures).
+
+    Split out of main() so a long-running service can call it directly
+    instead of shelling out to the script.
+    """
+    out_dir = Path(out_dir) if out_dir else DOCS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
     failures = []
+    challenged = 0
     forbidden = 0
     session = build_session()
+    escalated = BACKEND == "browser"
 
-    for i, (team_name, (team_id, slug)) in enumerate(TEAMS.items()):
-        if i:
-            time.sleep(PER_TEAM_DELAY)
+    try:
+        for i, (team_name, (team_id, slug)) in enumerate(TEAMS.items()):
+            if i:
+                time.sleep(PER_TEAM_DELAY)
 
-        url = team_page_url(team_id, slug)
-        try:
-            page_text = fetch_page_text(session, url)
-            games = parse_games(page_text, team_name)
+            url = team_page_url(team_id, slug)
+            try:
+                try:
+                    html = fetch_page_html(session, url)
+                except ChallengeError:
+                    # An HTTP client cannot clear the interstitial, so swap
+                    # in a real browser once and carry it for the rest of
+                    # the run — the clearance cookie makes the remaining
+                    # pages ordinary requests.
+                    if escalated or BACKEND not in ("auto", "browser"):
+                        raise
+                    if not browser_available():
+                        raise ChallengeError(
+                            "Cloudflare challenge, and Playwright is not "
+                            "installed to clear it (pip install playwright "
+                            "&& playwright install chromium)"
+                        )
+                    print(
+                        "\nCloudflare challenge detected — escalating to a "
+                        "real browser for the rest of the run.\n",
+                        file=sys.stderr,
+                    )
+                    close_session(session)
+                    session = build_browser_session()
+                    escalated = True
+                    html = fetch_page_html(session, url)
 
-            if len(games) < 40:
-                # A full season is ~54 games. Far fewer means parsing
-                # broke (site redesign etc.) — skip this team rather
-                # than overwrite a good file with a broken one.
-                print(
-                    f"WARNING: {team_name}: only parsed {len(games)} games, "
-                    "expected ~54. Skipping this team's file.",
-                    file=sys.stderr,
-                )
+                games = parse_games(html, team_name)
+
+                if len(games) < MIN_GAMES:
+                    # Skip this team rather than overwrite a good file with
+                    # a broken one, and dump the page so the shape can be
+                    # seen.
+                    print(
+                        f"WARNING: {team_name}: only parsed {len(games)} games, "
+                        "expected ~54. Skipping this team's file.",
+                        file=sys.stderr,
+                    )
+                    dump_page(slug, html)
+                    failures.append(team_name)
+                    continue
+
+                ics_content = build_ics(team_name, slug, games)
+                out_path = out_dir / f"{slug}.ics"
+                out_path.write_text(ics_content, encoding="utf-8")
+                written.append(slug)
+                print(f"{team_name}: wrote {len(games)} games to {out_path}")
+
+            except ChallengeError as e:
+                challenged += 1
+                print(f"ERROR: {team_name}: {e}", file=sys.stderr)
                 failures.append(team_name)
-                continue
-
-            ics_content = build_ics(team_name, slug, games)
-            out_path = DOCS_DIR / f"{slug}.ics"
-            out_path.write_text(ics_content, encoding="utf-8")
-            print(f"{team_name}: wrote {len(games)} games to {out_path}")
-
-        except Exception as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            if status in (403, 429):
-                forbidden += 1
-            print(f"ERROR: {team_name}: {e}", file=sys.stderr)
-            failures.append(team_name)
+            except Exception as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status in (403, 429):
+                    forbidden += 1
+                print(f"ERROR: {team_name}: {e}", file=sys.stderr)
+                failures.append(team_name)
+    finally:
+        close_session(session)
 
     if failures:
         print(f"\nCompleted with issues for: {', '.join(failures)}", file=sys.stderr)
-        if forbidden == len(TEAMS):
+        if challenged:
             print(
-                "\nEvery request was rejected by the site's edge (403/429). The "
-                "request headers are not the problem on their own — the source "
-                "IP is likely blocked too. Options: override the User-Agent via "
-                "the SCRAPER_USER_AGENT env var, slow the run down via "
-                "SCRAPER_DELAY, or run the scraper from a network the site "
-                "accepts (self-hosted runner / outbound proxy) instead of a "
-                "GitHub-hosted runner.",
+                "\nCloudflare served its JS interstitial and the browser did "
+                "not clear it. A headless browser on a datacenter IP is "
+                "exactly what a managed challenge targets, so the remaining "
+                "options are:\n"
+                "  - Run headed under xvfb (SCRAPER_BROWSER_HEADLESS=0 with "
+                "xvfb-run), which some managed challenges accept.\n"
+                "  - Run from a residential IP: a self-hosted runner, or a "
+                "local cron that commits the .ics files.\n"
+                "  - Ask hockeyslovakia.sk to allowlist the scraper, or use a "
+                "feed they publish for the purpose.",
                 file=sys.stderr,
             )
+        elif forbidden == len(TEAMS):
+            backend = "curl_cffi" if use_curl_cffi() else "requests"
+            print(
+                f"\nEvery request was refused by the site's edge, using the "
+                f"{backend} backend, with no challenge page. That is an IP "
+                "block: GitHub-hosted runner ranges are widely blocklisted, "
+                "and nothing inside this script can change it — it needs a "
+                "self-hosted runner or an outbound proxy on an accepted "
+                "network.",
+                file=sys.stderr,
+            )
+
+    return written, failures
+
+
+def main():
+    _, failures = scrape_all()
+    if failures:
         sys.exit(1)
+
+
+def close_session(session) -> None:
+    for name in ("close",):
+        closer = getattr(session, name, None)
+        if closer is not None:
+            try:
+                closer()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
